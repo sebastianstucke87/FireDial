@@ -33,5 +33,10 @@
     "typescript": "^7.0.2",
     "web-ext": "^10.8.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "typed-rest-client": {
+      "qs": "6.16.2"
+    }
+  }
 }
