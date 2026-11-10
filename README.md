@@ -12,9 +12,17 @@ Minimal speed dial for your bookmarks in Firefox! Completely free and open sourc
   <img width="32%" src="browsers/screenshots/list.png" alt="FireDial in light, Rose, list"/>
 </p>
 
-## Build
+## Install
 
-Needs Node 26.
+From addons.mozilla.org: https://addons.mozilla.org/firefox/addon/firedial/
+
+## Usage
+
+- Right-click any page, link or tab: **Add to FireDial**.
+- **Edit** (top right) holds all settings; **About** lists the keyboard shortcuts.
+- Sparks are bookmarks in **Other Bookmarks → FireDial**, so Firefox Sync carries them. Images stay on this device.
+
+## Build
 
 ```bash
 git clone https://github.com/sebastianstucke87/FireDial.git
@@ -25,21 +33,11 @@ npm run build
 
 The add-on is in `dist/firefox`. `npm test` runs the checks and the tests in headless Firefox.
 
-## Install
-
-From addons.mozilla.org: https://addons.mozilla.org/firefox/addon/firedial/
-
-Or from your build, until Firefox restarts:
+To load your build until Firefox restarts:
 
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click `Load Temporary Add-on...`
 3. Pick `dist/firefox/manifest.json`
-
-## Usage
-
-- Right-click any page, link or tab: **Add to FireDial**.
-- **Edit** (top right) holds all settings; **About** lists the keyboard shortcuts.
-- Sparks are bookmarks in **Other Bookmarks → FireDial**, so Firefox Sync carries them. Images stay on this device.
 
 ## Trust
 
