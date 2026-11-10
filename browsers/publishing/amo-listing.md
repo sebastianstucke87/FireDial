@@ -25,13 +25,13 @@ Same as `description` in `browsers/firefox/manifest.json`.
 ## Description
 
 ```
-FireDial turns your new tab into a speed dial of your bookmarks, sorted into groups. It starts with good causes, journalism and open web projects: keep them, delete them, or add your own with a right-click on any page, link or tab.
+FireDial turns your new tab into a speed dial of your bookmarks, in groups. Add any page with a right-click.
 
-Choose wide, tiles, square or list, the number of columns, light or dark and an accent color. Search your sparks or the web, undo any change, and save backups.
+Pick a layout, columns, light or dark and an accent color. Search, undo, backups.
 
-FireDial shows no ads, needs no account and sends your data nowhere. Your sparks are plain Firefox bookmarks, so Firefox Sync carries them to your other devices. Completely free and open source: https://github.com/sebastianstucke87/FireDial
+No ads, no account, no tracking. Your sparks are Firefox bookmarks, so Sync carries them. Open source: https://github.com/sebastianstucke87/FireDial
 
-Changed your mind about the starting sparks? About → Start over brings them back. Enjoy your new tab!
+Enjoy your new tab!
 ```
 
 ## Categories
