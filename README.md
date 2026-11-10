@@ -40,3 +40,9 @@ Or from your build, until Firefox restarts:
 - Right-click any page, link or tab: **Add to FireDial**.
 - **Edit** (top right) holds all settings; **About** lists the keyboard shortcuts.
 - Sparks are bookmarks in **Other Bookmarks → FireDial**, so Firefox Sync carries them. Images stay on this device.
+
+## Trust
+
+- FireDial is only published at github.com/sebastianstucke87/firedial and addons.mozilla.org/firefox/addon/firedial. Anything else claiming to be FireDial is fake: please report it.
+- FireDial is not for sale.
+- Something odd? [Open an issue](https://github.com/sebastianstucke87/firedial/issues), or for security problems [report a vulnerability](https://github.com/sebastianstucke87/firedial/security/advisories/new) privately.
