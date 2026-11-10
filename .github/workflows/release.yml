@@ -1,0 +1,67 @@
+# Every push to main and every pull request (e.g. from Dependabot) is tested. A tag like v2026.11.10.183412 on main is also submitted to addons.mozilla.org.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
+  pull_request:
+  # Started on a tag by dependabot.yml, whose tag push alone would start nothing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    # The AMO keys live in the environment amo, which only v* tags may use; everything else runs without one.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'amo' || '' }}
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+
+      - name: Take the version from the tag
+        if: env.RELEASE == 'true'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          echo "FIREDIAL_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - run: npm test
+
+      # Mutation testing: the unit tests must notice changed logic, see stryker.config.json for the bar.
+      # Incremental: results of the last run are reused, only mutants in changed code or under changed tests run again.
+      # A tag runs everything once more before it is released.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.RELEASE != 'true'
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-${{ github.sha }}
+          restore-keys: stryker-
+      - id: mutate
+        run: npm run mutate
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && steps.mutate.outcome != 'skipped' && hashFiles('reports/stryker-incremental.json') != ''
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-${{ github.sha }}
+
+      # Listed versions need review, usually automatic. Waiting for it could outlast this job, so submit and finish.
+      - name: Submit to addons.mozilla.org
+        if: env.RELEASE == 'true'
+        run: |
+          git ls-files -z | xargs -0 zip -q firedial-source.zip
+          npx web-ext sign --source-dir dist/firefox --channel listed --amo-metadata browsers/publishing/amo-metadata.json --upload-source-code firedial-source.zip --approval-timeout 0
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_API_SECRET }}

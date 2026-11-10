@@ -1,0 +1,27 @@
+# Weekly updates: patch and minor grouped into one PR per ecosystem, merged automatically by
+# workflows/dependabot.yml; each major update in its own PR, left for review.
+# New releases wait 7 days, like .npmrc's min-release-age.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
+        update-types: [minor, patch]

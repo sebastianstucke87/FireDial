@@ -1,0 +1,9 @@
+{
+  "name": { "en-US": "FireDial" },
+  "summary": { "en-US": "Minimal speed dial for your bookmarks! Completely free and open source: no ads, no account, no tracking, no BS." },
+  "categories": { "firefox": ["tabs", "bookmarks"] },
+  "version": {
+    "license": "MIT",
+    "approval_notes": "TypeScript bundled with esbuild, not minified. Rebuild: npm ci && npm run build, needs Node 26. Output is in dist/firefox."
+  }
+}

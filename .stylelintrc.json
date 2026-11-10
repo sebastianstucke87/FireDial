@@ -1,0 +1,11 @@
+{
+  "extends": "stylelint-config-standard",
+  "rules": {
+    "selector-class-pattern": [
+      "^([A-Z][A-Za-z]*(__[a-z][A-Za-z]*)?(--[a-z][A-Za-z]*)?|[a-z]+)$",
+      { "message": "Use Block, Block__element, Block--modifier or a lowercase state such as editing" }
+    ],
+    "selector-id-pattern": "^[a-z][A-Za-z]*$",
+    "no-descending-specificity": null
+  }
+}

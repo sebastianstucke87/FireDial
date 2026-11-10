@@ -1,0 +1,1949 @@
+/* FireDial new tab page */
+
+/* Onest, shipped with the extension (SIL Open Font License, fonts/OFL.txt). Other scripts use the
+   system font. It's read from disk at once, so no swap: that would flash another font on each new tab */
+@font-face {
+  font-family: Onest;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('fonts/onest-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: Onest;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('fonts/onest-latin-ext.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------- neutral base + one accent per color ---------- */
+:root {
+  --bg: #f4f4f5;
+  --surface: #fff;
+  --surface-2: #ececee;
+  --text: #18181b;
+  --muted: #5f5f68;
+  --border: #e0e0e5;
+  --on-accent: #fff;
+  --off-accent: #000;
+  --accent-mark: var(--accent);
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, var(--off-accent));
+  --shadow: 0 1px 2px rgb(20 20 30 / 6%), 0 4px 14px rgb(20 20 30 / 6%);
+  --font: 'Onest', system-ui, 'Segoe UI', roboto, sans-serif;
+  --firedial-toast-font: var(--font);
+  --thumb-bg: #fff; /* behind previews that don't fill the tile */
+  --accent-soft: color-mix(in srgb, var(--accent-mark) 13%, var(--surface));
+  --raised: var(--surface); /* the chosen part of a segmented control */
+  --columns: 5;
+  --gap: 18px;
+  --first-row: 140px;
+  --rail: 236px;
+  --options: 360px;
+  --bars: 60px;
+  --scrollbar: 0px;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #17171a;
+  --surface: #222226;
+  --surface-2: #2c2c31;
+  --text: #f4f4f5;
+  --muted: #a8a8b2;
+  --border: #36363d;
+  --thumb-bg: var(--surface-2);
+  --raised: #3f3f46;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 6px 18px rgb(0 0 0 / 25%);
+  --accent-soft: color-mix(in srgb, var(--accent-mark) 20%, var(--surface));
+}
+
+/* --accent: the selected color, for fills. newtab.ts works out the rest for any color:
+   --on-accent: black or white, whatever reads on a fill; --off-accent: the other one, for hover;
+   --accent-mark: lines and icons on the page, the color itself unless it would vanish there.
+   Text is never in the selected color: on the page it's --text, on a fill --on-accent. */
+[data-color='firedial'] {
+  --accent: #c2410c;
+}
+
+[data-color='rose'] {
+  --accent: #be123c;
+}
+
+[data-color='berry'] {
+  --accent: #a3307a;
+}
+
+[data-color='violet'] {
+  --accent: #6d28d9;
+}
+
+[data-color='ocean'] {
+  --accent: #1d4ed8;
+}
+
+[data-color='teal'] {
+  --accent: #0f766e;
+}
+
+[data-color='forest'] {
+  --accent: #166534;
+}
+
+[data-color='custom'] {
+  --accent: var(--custom);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 var(--font);
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.Booting body {
+  visibility: hidden;
+  transition: none;
+} /* nothing shows until the data is there */
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.Sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-mark);
+  outline-offset: 2px;
+}
+
+/* ---------- layout: rail | content | options (a column, never an overlay) ---------- */
+.App {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  height: 100vh;
+}
+
+.App--options {
+  grid-template-columns: var(--rail) minmax(0, 1fr) var(--options);
+}
+
+/* notifications stay next to the options, above the bars */
+html:has(.App--options) {
+  --firedial-toast-right: calc(var(--options) + 24px + var(--scrollbar));
+  --firedial-toast-bottom: calc(var(--bars) + 12px);
+}
+
+.Rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 12px 14px 16px;
+  position: relative;
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+
+/* In Edit, the right edge of the group sidebar: drag it, or focus it and use the arrow keys */
+.Rail__resize {
+  display: none;
+  position: absolute;
+  inset: 0 -5px 0 auto;
+  z-index: 2;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.editing .Rail__resize {
+  display: block;
+}
+
+.Rail__resize::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 2px;
+  transition: background-color 0.15s;
+}
+
+.Rail__resize:hover::after,
+.Rail__resize:focus-visible::after,
+.resizing .Rail__resize::after {
+  background: var(--accent-mark);
+}
+
+.Rail__resize:focus-visible {
+  outline: none;
+}
+
+.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* the first group on --first-row: rail padding, gap and the list's padding. That centers the logo on the search bar */
+.RailHead {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: calc(var(--first-row) - 14px - 12px - 2px);
+  padding: 0 8px;
+}
+
+/* as large as the narrowest group sidebar holds it */
+.Logo {
+  display: flex;
+  align-items: center;
+  gap: 0.33em;
+  font-weight: 700;
+  font-size: min(30px, calc(var(--rail) * 0.13));
+  letter-spacing: -0.02em;
+}
+
+.Logo svg {
+  width: 1.33em;
+  height: 1.33em;
+  color: var(--accent-mark);
+}
+
+/* ---------- groups ---------- */
+.Groups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  margin: 0 -4px;
+  padding: 2px 4px;
+  scrollbar-width: thin;
+}
+
+.Group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.Group .Name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.Group small {
+  display: block;
+  font-size: 12px;
+  line-height: 1;
+} /* as far from the right edge as from the top and bottom */
+.Group:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.Group--active,
+.Group--active:hover {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-mark);
+  color: var(--on-accent);
+}
+
+.Group--drop,
+.Group--drop:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* marked for deleting: the same look as a selected spark */
+.Group--marked,
+.Group--marked:hover {
+  background: color-mix(in srgb, var(--accent-mark) 14%, var(--surface));
+  box-shadow: inset 0 0 0 2px var(--accent-mark);
+  color: var(--text);
+}
+
+.Group--active.Group--marked {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--on-accent);
+  color: var(--on-accent);
+}
+
+/* where a dragged group lands: a straight line in the gap */
+.Group--dropBefore::before,
+.Group--dropAfter::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-mark);
+  pointer-events: none;
+}
+
+.Group--dropBefore::before {
+  top: -2px;
+}
+
+.Group--dropAfter::before {
+  bottom: -2px;
+}
+
+.Group--dragging {
+  opacity: 0.4;
+}
+
+.Handle {
+  display: none;
+}
+
+/* edit mode: handle, editable name */
+.editing .Group {
+  padding: 0 14px 0 6px;
+  cursor: default;
+}
+
+.editing .Handle {
+  display: flex;
+  color: var(--muted);
+  cursor: grab;
+}
+
+.editing .Group--active .Handle {
+  color: inherit;
+}
+
+.editing .Group .Name {
+  display: none;
+}
+
+.NameInput {
+  display: none;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  outline: 0;
+  text-overflow: ellipsis;
+}
+
+.editing .NameInput {
+  display: block;
+}
+
+.editing .Group:not(.Group--active) .NameInput {
+  pointer-events: none;
+} /* a click switches to the group, the next one renames */
+.NameInput:hover {
+  border-color: color-mix(in srgb, currentcolor 30%, transparent);
+}
+
+.NameInput:focus {
+  border-color: var(--accent-mark);
+  background: var(--surface);
+  color: var(--text);
+  text-overflow: clip;
+}
+
+.NewGroup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  flex-shrink: 0;
+  border-radius: 12px;
+}
+
+.NewGroupInput {
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-mark);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/* ---------- content ---------- */
+.Content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  container-type: inline-size;
+}
+
+/* the bar in the middle of the space above --first-row; below it, .Main's padding comes on top */
+.Top {
+  display: grid;
+  grid-template-columns: minmax(0, 600px);
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: calc((var(--first-row) - 48px) / 2) 24px calc((var(--first-row) - 48px) / 2 - 20px);
+}
+
+.GroupPick {
+  display: none;
+}
+
+.Main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable; /* the same width with or without a scrollbar: nothing moves between groups */
+  display: flex;
+  justify-content: center;
+  padding: 20px 24px calc(var(--bars) + 20px);
+  user-select: none;
+} /* scrolls clear of the bars */
+
+/* never moves: the same corner with the options open or closed, level with the logo */
+.EditToggle {
+  position: fixed;
+  top: 11px;
+  right: 11px;
+  z-index: 41;
+  justify-content: center;
+  width: 96px;
+}
+
+/* ---------- text fields: the box is around the input, so the clear strip can fill its end ---------- */
+.Input {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.Input input {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.Input:focus-within {
+  border-color: var(--accent-mark);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* a narrow strip along the end of a box: easy to hit, and out of the way */
+.Strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.Strip:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.Clear {
+  align-self: stretch;
+}
+
+.Clear .icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* ---------- search ---------- */
+.SearchWrap {
+  --round: 24px;
+
+  position: relative;
+  width: 100%;
+}
+
+.Search {
+  height: 48px;
+  padding-left: 16px;
+  border: 2px solid var(--accent-mark);
+  border-radius: var(--round);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--shadow);
+}
+
+.Search:focus-within {
+  border-color: var(--accent-mark);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.Search input {
+  padding: 0 8px;
+  font-size: 16px;
+}
+
+.Search .Clear {
+  width: 44px;
+}
+
+.SearchWrap:has(.Suggest:not([hidden])) .Search {
+  border-bottom-color: transparent;
+  border-radius: var(--round) var(--round) 0 0;
+  box-shadow: none;
+}
+
+.Suggest {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  border-radius: 0 0 var(--round) var(--round);
+}
+
+.SuggestItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.SuggestItem--active {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-mark);
+  color: var(--on-accent);
+}
+
+.SuggestItem .icon {
+  color: var(--muted);
+}
+
+.SuggestItem span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.SuggestItem small {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.SuggestItem kbd {
+  visibility: hidden;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: 12px var(--font);
+  color: var(--muted);
+}
+
+.SuggestItem--active kbd {
+  visibility: visible;
+}
+
+.SuggestItem--active .icon,
+.SuggestItem--active small,
+.SuggestItem--active kbd {
+  border-color: currentcolor;
+  background: none;
+  color: inherit;
+}
+
+/* ---------- sparks ---------- */
+
+/* --columns tiles, or fewer when a tile would get narrower than --tile-min. In edit mode the
+   options take width away, so the grid shows the column count the slider will give without them.
+   More columns than 1200px hold make the grid wider, so a wide window can show them. */
+.Sparks {
+  --tile-min: 130px;
+  --row-gap: var(--gap);
+  --col-gap: var(--gap);
+
+  display: grid;
+  align-self: flex-start;
+  gap: var(--row-gap) var(--col-gap);
+  align-content: start; /* as high as its rows, or .Main's padding comes before the end of them */
+  width: min(100%, max(1200px, calc(var(--columns-shown) * var(--tile-min) + (var(--columns-shown) - 1) * var(--col-gap) + 1px)));
+  grid-template-columns: repeat(auto-fill, minmax(max(var(--tile-min), calc((100% - (var(--columns) - 1) * var(--col-gap)) / var(--columns) - 0.1px)), 1fr));
+}
+
+.editing .Sparks {
+  grid-template-columns: repeat(var(--columns-shown), minmax(0, 1fr));
+}
+
+.Spark {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 0.15s;
+}
+
+.Sparks .Spark:hover {
+  transform: translateY(-2px);
+}
+
+.Thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--thumb-color, var(--thumb-bg));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.Thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.Thumb--small img {
+  width: auto;
+  height: 46%;
+} /* an icon: blurry at full size */
+.Letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.Text {
+  min-width: 0;
+  padding: 0 6px 4px;
+  text-align: center;
+}
+
+.Title {
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.Host,
+.In {
+  display: none;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.In {
+  display: block;
+}
+
+/* the "add" skeletons: new spark and new group look the same */
+.Skeleton {
+  border: 2px dashed var(--border);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.Skeleton:hover {
+  border-color: var(--accent-mark);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.Skeleton .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* the next-spark tile: same box as a spark, so it never collapses */
+.AddSpark {
+  box-shadow: none;
+  padding: 6px;
+}
+
+.Sparks .AddSpark:hover {
+  transform: none;
+}
+
+.AddSpark .Thumb,
+.AddSpark .Text {
+  visibility: hidden;
+}
+
+.AddSpark .Plus {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.AddSpark--editing,
+.AddSpark--editing:hover {
+  cursor: default;
+  border-style: solid;
+  border-color: var(--accent-mark);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.AddSpark input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  text-align: center;
+  outline: 0;
+}
+
+/* edit mode on sparks: select, drag, edit */
+.EditSpark {
+  display: none;
+}
+
+.editing .Sparks .Spark:not(.AddSpark) {
+  cursor: pointer;
+}
+
+.editing .Sparks .Spark:not(.AddSpark):hover {
+  transform: none;
+}
+
+.Spark--selected .Host,
+.Spark--selected .In {
+  color: var(--text);
+}
+
+.Spark--selected {
+  background: color-mix(in srgb, var(--accent-mark) 14%, var(--surface));
+  box-shadow:
+    0 0 0 2px var(--accent-mark),
+    var(--shadow);
+}
+
+.editing .EditSpark {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 1;
+  display: flex;
+  width: 32px;
+  border-top-right-radius: inherit;
+  border-bottom-right-radius: inherit;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.editing .EditSpark:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.EditSpark .icon {
+  width: 15px;
+  height: 15px;
+}
+
+body.editing .Sparks .Spark {
+  padding-right: 40px;
+} /* the strip takes no content away */
+.Spark--dragging {
+  opacity: 0.4;
+}
+
+/* a spark just added, opened from the toast */
+.Spark--reveal {
+  animation: reveal 1s ease-in-out 3;
+}
+
+@keyframes reveal {
+  50% {
+    box-shadow:
+      0 0 0 4px var(--accent-mark),
+      var(--shadow);
+  }
+}
+
+/* where dragged sparks land: a straight line in the gap */
+.Spark--drop::after,
+.Spark--dropAfter::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent-mark);
+  pointer-events: none;
+}
+
+.Spark--drop::after {
+  left: calc(var(--col-gap) / -2 - 1.5px);
+}
+
+.Spark--dropAfter::after {
+  right: calc(var(--col-gap) / -2 - 1.5px);
+}
+
+.Band {
+  position: fixed;
+  z-index: 30;
+  border: 1px solid var(--accent-mark);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-mark) 12%, transparent);
+  pointer-events: none;
+}
+
+/* Square layout: 1:1 previews */
+[data-layout='square'] .Sparks .Thumb {
+  aspect-ratio: 1;
+}
+
+/* Wide layout: text-friendly, about 4:1 */
+[data-layout='wide'] .Sparks {
+  --tile-min: 240px;
+}
+
+[data-layout='wide'] .Sparks .Spark {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 7px;
+  border-radius: 14px;
+}
+
+[data-layout='wide'] .Sparks .Thumb {
+  width: 38%;
+  border-radius: 9px;
+}
+
+[data-layout='wide'] .Sparks .Text {
+  flex: 1;
+  padding: 0 4px 0 0;
+  text-align: left;
+}
+
+[data-layout='wide'] .Sparks .Host {
+  display: block;
+}
+
+[data-layout='wide'] .Sparks .Letter {
+  font-size: 22px;
+}
+
+/* List layout: compact rows with a small icon */
+[data-layout='list'] .Sparks {
+  --tile-min: 200px;
+  --row-gap: calc(var(--gap) * 0.45);
+  --col-gap: calc(var(--gap) * 0.8);
+}
+
+[data-layout='list'] .Sparks .Spark {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 12px;
+}
+
+[data-layout='list'] .Sparks .Thumb {
+  width: 32px;
+  height: 32px;
+  aspect-ratio: 1;
+  border-radius: 8px;
+}
+
+[data-layout='list'] .Sparks .Thumb img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  border-radius: 0;
+}
+
+[data-layout='list'] .Sparks .Text {
+  flex: 1;
+  padding: 0;
+  text-align: left;
+}
+
+[data-layout='list'] .Sparks .Letter {
+  font-size: 15px;
+}
+
+[data-layout='list'] .AddSpark .Thumb {
+  height: 28px;
+}
+
+[data-layout='list'] .Sparks .AddSpark {
+  padding: 4px 10px 4px 4px;
+}
+
+[data-titles='off'] .Sparks .Text {
+  display: none;
+}
+
+[data-counts='off'] .Group small {
+  display: none;
+}
+
+[data-titles='off'][data-layout='wide'] .Sparks .Thumb {
+  width: 100%;
+}
+
+/* ---------- selection bar ---------- */
+
+/* Delete on the left, undo on the right: --bars high, counted from the bottom */
+.Bars {
+  position: absolute;
+  right: calc(24px + var(--scrollbar));
+  bottom: 20px;
+  left: 24px;
+  z-index: 35;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* a switch like Show/Hide */
+.History {
+  gap: 3px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 14%);
+  user-select: none;
+  pointer-events: auto;
+}
+
+.History button {
+  flex: none;
+  padding: 0 16px;
+}
+
+.History button:not(:disabled),
+.History button:not(:disabled):hover {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-mark);
+  color: var(--on-accent);
+}
+
+.History button:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.History button:disabled {
+  cursor: default;
+}
+
+.History button:disabled .icon {
+  opacity: 0.35;
+}
+
+/* Delete: a dashed place to drop things, as tall as the bars. A button once something is marked,
+   it perks up during a drag, opens wide under one, and gulps what it gets */
+.Trash {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-weight: 600;
+  user-select: none;
+  pointer-events: auto;
+  transform-origin: left center;
+  transition: transform 0.15s;
+}
+
+.Trash--armed,
+.Trash--armed:hover {
+  border-style: solid;
+  border-color: var(--accent-mark);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.dragging .Trash {
+  border-style: dashed;
+  border-color: var(--accent-mark);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.dragging .Trash.Trash--over {
+  transform: scale(1.12);
+  border-style: solid;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.Trash--over .icon {
+  animation: wiggle 0.35s ease-in-out infinite;
+}
+
+.Trash--gulp {
+  animation: gulp 0.4s ease-out;
+}
+
+@keyframes wiggle {
+  25% {
+    transform: rotate(-12deg);
+  }
+
+  75% {
+    transform: rotate(12deg);
+  }
+}
+
+@keyframes gulp {
+  40% {
+    transform: scale(1.25);
+  }
+
+  70% {
+    transform: scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .Trash,
+  .Trash--over,
+  .Trash--over .icon,
+  .Trash--gulp {
+    transition: none;
+    transform: none;
+    animation: none;
+  }
+}
+
+/* ---------- options column ---------- */
+.Options {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  user-select: none;
+}
+
+/* Done sits as far from this line as from the window's top and right */
+.Options header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 63px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* the first setting on --first-row: less the header, a section title and its gap */
+.Options__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: calc(var(--first-row) - 63px - 21px - 12px) 20px 12px;
+}
+
+.Options h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.Sections {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+.Section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.Section__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.Section__head .icon {
+  color: var(--accent-mark);
+}
+
+.Section .Setting {
+  margin-left: 28px;
+}
+
+.IconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.IconButton:hover {
+  background: var(--surface-2);
+}
+
+.Section--about {
+  gap: 8px;
+  margin-top: auto;
+}
+
+.Divider {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.Setting:last-child {
+  margin-bottom: 0;
+}
+
+.Setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.Setting > label {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.Segmented {
+  display: flex;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.Segmented button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.Segmented button[aria-pressed='true'] {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.Segmented .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.Swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px 6px;
+}
+
+.Swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.Swatch i {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 3px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.Swatch[aria-pressed='true'] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.Swatch[aria-pressed='true'] i {
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+.Swatch[data-value='firedial'] i {
+  background: #c2410c;
+}
+
+.Swatch[data-value='rose'] i {
+  background: #be123c;
+}
+
+.Swatch[data-value='berry'] i {
+  background: #a3307a;
+}
+
+.Swatch[data-value='violet'] i {
+  background: #6d28d9;
+}
+
+.Swatch[data-value='ocean'] i {
+  background: #1d4ed8;
+}
+
+.Swatch[data-value='teal'] i {
+  background: #0f766e;
+}
+
+.Swatch[data-value='forest'] i {
+  background: #166534;
+}
+
+/* the custom color: a hexagon, its value underneath, the honeycomb to pick from */
+.Swatch--custom span:first-child {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.Swatch--custom i,
+.Swatch--custom[aria-pressed='true'] i {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--custom);
+  box-shadow: none;
+  clip-path: polygon(50% 0, 94% 25%, 94% 75%, 50% 100%, 6% 75%, 6% 25%);
+}
+
+.Swatch--custom[aria-pressed='true'] span:first-child {
+  filter: drop-shadow(0 0 1px var(--text)) drop-shadow(0 0 1px var(--text));
+}
+
+.Honeycomb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.Honeycomb__row {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  margin-top: -9px;
+}
+
+.Honeycomb__row:first-child {
+  margin-top: 0;
+}
+
+.Hex {
+  position: relative;
+  width: 34px;
+  height: 39px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.Hex i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--hex);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+
+.Hex:hover,
+.Hex:focus-visible {
+  z-index: 1;
+  outline: 0;
+  transform: scale(1.12);
+}
+
+.Hex[aria-pressed='true'] {
+  z-index: 2;
+  filter: drop-shadow(0 0 1px var(--text)) drop-shadow(0 0 1px var(--text));
+}
+
+#customColor {
+  width: 120px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    500 14px ui-monospace,
+    monospace;
+  text-align: center;
+  text-transform: uppercase;
+  outline: 0;
+}
+
+#customColor:focus {
+  border-color: var(--accent-mark);
+}
+
+.Stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.Stepper input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent-mark);
+}
+
+.Stepper output {
+  min-width: 8ch;
+  font-weight: 600;
+  text-align: right;
+}
+
+.Buttons {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr); /* one row, all the same width */
+  grid-auto-flow: column;
+  gap: 8px;
+}
+
+.Buttons .Button {
+  padding: 0 8px; /* room for three labels in the About width */
+  white-space: nowrap;
+}
+
+.Button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.Button:hover {
+  background: var(--surface-2);
+}
+
+.Button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ---------- context menu ---------- */
+.ContextMenu {
+  position: fixed;
+  z-index: 100;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 16%);
+  user-select: none;
+}
+
+.ContextMenu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ContextMenu__item:hover,
+.ContextMenu__item:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.ContextMenu__item .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-mark);
+}
+
+/* ---------- modal: flame and title, then its content, its actions last ---------- */
+.Modal {
+  position: fixed;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 22%);
+  outline: 0;
+}
+
+.Modal::backdrop {
+  background: rgb(10 10 14 / 38%);
+  backdrop-filter: blur(3px);
+}
+
+.Modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+}
+
+.Modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+
+.Modal__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.Modal__title .icon {
+  width: 30px;
+  height: 30px;
+  color: var(--accent-mark);
+}
+
+/* About: the name as big as the logo in the group sidebar, centered, the close button aside */
+.Modal--hero .Modal__head {
+  position: relative;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.Modal--hero .Modal__title {
+  gap: 0.33em;
+  font-size: 30px;
+}
+
+.Modal--hero .Modal__title .icon {
+  width: 1.33em;
+  height: 1.33em;
+}
+
+.Modal--hero .Modal__close {
+  position: absolute;
+  right: 0;
+}
+
+.Modal__close {
+  width: 32px;
+  height: 32px;
+  margin-right: -6px;
+  color: var(--muted);
+}
+
+.Modal__close:hover {
+  color: var(--text);
+}
+
+.Modal__text {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.Modal__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.Modal__note a {
+  color: inherit;
+}
+
+.Modal__note a:hover {
+  color: var(--text);
+}
+
+.Modal__foot {
+  display: flex;
+  flex-direction: column;
+}
+
+.Modal progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--accent-mark);
+}
+
+.Drop {
+  position: relative;
+}
+
+.Drop .Thumb {
+  border-radius: 14px;
+}
+
+.Drop .Thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--border);
+  pointer-events: none;
+} /* above the image, or it hides the line */
+.Drop .Thumb--small img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  padding: 13%;
+  border-radius: 0;
+} /* a % height would feed back into the 16:9 box */
+.Drop--over .Thumb {
+  background: var(--accent-soft);
+}
+
+.Drop--over .Thumb::after {
+  box-shadow: inset 0 0 0 2px var(--accent-mark);
+}
+
+.Drop__hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.Drop--empty .Letter {
+  display: none;
+}
+
+.Field {
+  display: block;
+}
+
+.Field--invalid .Input {
+  border-color: #dc2626;
+}
+
+.Modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+} /* with the form's gap, as far as sections are apart */
+.Modal__actions .Spacer {
+  flex: 1;
+}
+
+.Button--primary,
+.EditToggle[aria-pressed='true'] {
+  border-color: var(--accent-mark);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.Button--primary:hover,
+.EditToggle[aria-pressed='true']:hover {
+  background: var(--accent-hover);
+}
+
+/* can't be taken back: outlined, with the warning sign. The last step, the question, is .Button--primary */
+.Button--warn {
+  border: 2px solid var(--accent-mark);
+}
+
+.Button--warn .icon {
+  color: var(--accent-mark);
+}
+
+.Button--warn:hover {
+  background: var(--accent-soft);
+}
+
+.Button--quiet {
+  padding: 0 10px;
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+}
+
+.Button--quiet:hover {
+  color: var(--text);
+}
+
+/* ---------- about ---------- */
+.Keys {
+  display: grid;
+  grid-template-columns: 10rem 1fr; /* fixed, so the descriptions of both lists line up */
+  gap: 12px 24px;
+  margin: 0;
+  align-items: center;
+}
+
+.Keys dt {
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.Keys dd {
+  margin: 0;
+}
+
+kbd {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px var(--font);
+}
+
+.Confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.Confirm input {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--accent-mark);
+}
+
+/* ---------- dropdown: open, the button and the list are one shape ---------- */
+.Dropdown {
+  min-width: 0;
+}
+
+.Dropdown__button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px 0 16px;
+  border: 2px solid var(--accent-mark);
+  border-radius: 22px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.Dropdown__button span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.Dropdown--open .Dropdown__button {
+  border-bottom-color: transparent;
+  border-radius: 22px 22px 0 0;
+}
+
+.Dropdown--open .Dropdown__button .icon {
+  transform: rotate(180deg);
+}
+
+.Dropdown__list,
+.Suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px 8px;
+  border: 2px solid var(--accent-mark);
+  border-top: 0;
+  background: var(--surface);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 14%);
+}
+
+.Dropdown__list {
+  position: fixed;
+  z-index: 31;
+  overflow: auto;
+  border-radius: 0 0 22px 22px;
+  scrollbar-width: thin;
+}
+
+.Dropdown__option {
+  flex-shrink: 0;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.Dropdown__option:hover,
+.Dropdown__option:focus-visible {
+  outline: 0;
+  background: var(--surface-2);
+}
+
+.Dropdown__option[aria-selected='true'] {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-mark);
+  color: var(--on-accent);
+}
+
+.Dropdown--open.Dropdown--up .Dropdown__button {
+  border-top-color: transparent;
+  border-bottom-color: var(--accent-mark);
+  border-radius: 0 0 22px 22px;
+}
+
+.Dropdown--up .Dropdown__list {
+  padding: 8px 6px 4px;
+  border-top: 2px solid var(--accent-mark);
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+}
+
+.BootError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 24px;
+}
+
+/* ---------- narrow windows ---------- */
+
+/* too narrow for the search bar to pass the Edit button */
+@media (width >= 701px) and (width <= 1120px) {
+  .App:not(.App--options) .Top {
+    padding-right: 120px;
+  }
+}
+
+@media (width <= 1000px) {
+  .App--options {
+    grid-template-columns: var(--rail) minmax(0, 1fr);
+  }
+
+  .App--options .Bars {
+    right: calc(var(--options) + 24px + var(--scrollbar));
+  }
+
+  .Options {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 40;
+    width: min(var(--options), 100vw);
+    box-shadow: 0 0 40px rgb(0 0 0 / 22%);
+  }
+}
+
+@container (max-width: 460px) {
+  .Top,
+  .Main {
+    padding-inline: 12px;
+  }
+}
+
+/* too narrow for the rail: a read-only view with the groups in a dropdown */
+@media (width <= 700px) {
+  .App {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .Rail,
+  .EditToggle {
+    display: none;
+  }
+
+  .Top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .SearchWrap {
+    --round: 22px;
+  }
+
+  .Search {
+    height: 44px;
+  }
+
+  .GroupPick {
+    display: block;
+  }
+
+  .Main {
+    padding-inline: 12px;
+  }
+}

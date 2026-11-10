@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" class="Booting" data-color="firedial" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <title>FireDial</title>
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="preload" href="fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="newtab.css">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+  <svg class="Sprite" aria-hidden="true">
+    <symbol id="i-flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-undo" viewBox="-1 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+    <symbol id="i-redo" viewBox="1 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></symbol>
+    <symbol id="i-droplet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="12" x2="14" y2="12"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  </svg>
+
+  <div class="App" id="app">
+    <aside class="Rail" aria-label="Groups">
+      <div class="RailHead">
+        <div class="Logo"><svg><use href="#i-flame"/></svg>FireDial</div>
+      </div>
+      <nav class="Groups" id="groups"></nav>
+      <button type="button" class="NewGroup Skeleton" id="newGroup" data-action="new-group" aria-label="New group"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <div class="Rail__resize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Group sidebar width" aria-valuemin="180" aria-valuemax="400" tabindex="0" title="Drag to resize, double-click for the default"></div>
+    </aside>
+
+    <section class="Content">
+      <div class="Top">
+        <div class="SearchWrap">
+          <label class="Input Search">
+            <svg class="icon"><use href="#i-search"/></svg>
+            <input type="text" id="search" placeholder="Search or enter address" autocomplete="off" spellcheck="false">
+          </label>
+          <!-- [html-validate-disable-next prefer-native-element: search suggestions, not a select] -->
+          <div class="Suggest" id="suggest" role="listbox" hidden></div>
+        </div>
+        <div class="GroupPick" id="groupPick"></div>
+      </div>
+      <div class="BootError" id="bootError" role="alert" hidden>FireDial couldn't load your data. <button type="button" class="Button" data-action="reload">Reload</button></div>
+      <main class="Main" id="main"><div class="Sparks" id="sparks"></div></main>
+      <div class="Bars">
+        <button type="button" class="Trash Skeleton" id="trash" data-action="trash" hidden><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
+        <div class="Segmented History" id="history" hidden>
+          <button type="button" id="undo" data-action="undo" disabled><svg class="icon"><use href="#i-undo"/></svg>Undo</button>
+          <button type="button" id="redo" data-action="redo" disabled><svg class="icon"><use href="#i-redo"/></svg>Redo</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="Options" id="options" aria-label="Edit" hidden>
+      <header><h2>Settings</h2></header>
+      <div class="Options__body Sections">
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-droplet"/></svg>Color</h3>
+          <div class="Setting">
+            <div class="Segmented" data-setting="theme">
+              <button type="button" data-value="light"><svg class="icon"><use href="#i-sun"/></svg>Light</button>
+              <button type="button" data-value="dark"><svg class="icon"><use href="#i-moon"/></svg>Dark</button>
+              <button type="button" data-value="system"><svg class="icon"><use href="#i-monitor"/></svg>System</button>
+            </div>
+          </div>
+          <div class="Setting">
+            <div class="Swatches" data-setting="color">
+              <button type="button" class="Swatch" data-value="firedial"><i></i>FireDial</button>
+              <button type="button" class="Swatch" data-value="rose"><i></i>Rose</button>
+              <button type="button" class="Swatch" data-value="berry"><i></i>Berry</button>
+              <button type="button" class="Swatch" data-value="violet"><i></i>Violet</button>
+              <button type="button" class="Swatch" data-value="ocean"><i></i>Ocean</button>
+              <button type="button" class="Swatch" data-value="teal"><i></i>Teal</button>
+              <button type="button" class="Swatch" data-value="forest"><i></i>Forest</button>
+              <button type="button" class="Swatch Swatch--custom" data-value="custom"><span><i></i></span><span id="customValue"></span></button>
+            </div>
+            <div class="Honeycomb" id="honeycomb" hidden>
+              <div id="honeycombCells"></div>
+              <input type="text" id="customColor" maxlength="7" autocomplete="off" spellcheck="false" aria-label="Color value">
+            </div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-sidebar"/></svg>Groups</h3>
+          <div class="Setting">
+            <label>Counts</label>
+            <div class="Segmented" data-setting="counts"><button type="button" data-value="on">Show</button><button type="button" data-value="off">Hide</button></div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-grid"/></svg>Sparks</h3>
+          <div class="Setting">
+            <label>Titles</label>
+            <div class="Segmented" data-setting="titles"><button type="button" data-value="on">Show</button><button type="button" data-value="off">Hide</button></div>
+          </div>
+          <div class="Setting">
+            <label>Layout</label>
+            <div class="Segmented" data-setting="layout"><button type="button" data-value="wide">Wide</button><button type="button" data-value="tiles">Tiles</button><button type="button" data-value="square">Square</button><button type="button" data-value="list">List</button></div>
+          </div>
+          <div class="Setting">
+            <label for="columns">Columns</label>
+            <div class="Stepper"><input type="range" min="3" max="8" id="columns"><output id="columnsOut" for="columns"></output></div>
+          </div>
+          <div class="Setting">
+            <label for="density">Spacing</label>
+            <div class="Stepper"><input type="range" min="1" max="5" id="density"><output id="densityOut" for="density"></output></div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-archive"/></svg>Backup</h3>
+          <div class="Setting">
+            <div class="Buttons">
+              <button type="button" class="Button" data-action="export">Export</button>
+              <button type="button" class="Button Button--warn" data-action="import"><svg class="icon"><use href="#i-alert"/></svg>Import</button>
+            </div>
+            <input id="importFile" type="file" accept=".json,application/json" hidden>
+          </div>
+        </section>
+        <section class="Section Section--about">
+          <hr class="Divider">
+          <button type="button" class="Button Button--quiet" data-action="about">About</button>
+        </section>
+      </div>
+    </aside>
+
+    <button type="button" class="Button EditToggle" id="editToggle" data-action="toggle-edit" aria-pressed="false"><svg class="icon"><use href="#i-edit"/></svg><span>Edit</span></button>
+  </div>
+
+  <div class="ContextMenu" role="menu" hidden></div>
+
+  <dialog class="Modal" id="sparkModal">
+    <form method="dialog" novalidate>
+      <div class="Sections">
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-image"/></svg>Preview</h3>
+          <div class="Setting">
+            <div class="Drop"></div>
+            <div class="Buttons">
+              <button type="button" class="Button" data-action="upload">Upload</button>
+              <button type="button" class="Button" data-action="clear-thumb">Clear</button>
+              <input name="file" type="file" accept="image/*" hidden>
+            </div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-sidebar"/></svg>Group</h3>
+          <div class="Setting">
+            <div id="sparkGroup"></div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-grid"/></svg>Spark</h3>
+          <div class="Setting">
+            <label class="Field"><span class="Input"><input type="text" name="title" aria-label="Title" autocomplete="off" maxlength="400"></span></label>
+            <label class="Field"><span class="Input"><input type="text" name="url" aria-label="URL" placeholder="URL" autocomplete="off" spellcheck="false" maxlength="4000"></span></label>
+          </div>
+        </section>
+      </div>
+      <div class="Modal__actions">
+        <button type="button" class="Button" data-close>Cancel</button>
+        <span class="Spacer"></span>
+        <button type="submit" value="save" class="Button Button--primary" id="sparkSave">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="Modal Modal--hero" id="aboutModal">
+    <!-- [html-validate-disable-next wcag/h32: Modal adds the close button] -->
+    <form method="dialog">
+      <div class="Sections">
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-keyboard"/></svg>Hotkeys</h3>
+          <div class="Setting">
+            <dl class="Keys">
+              <dt><kbd>/</kbd></dt><dd>Search</dd>
+              <dt><kbd>Enter</kbd></dt><dd>Open the spark or suggestion</dd>
+              <dt><kbd>Esc</kbd></dt><dd>Clear selection or search, leave Edit</dd>
+              <dt><kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&rarr;</kbd> <kbd>&darr;</kbd></dt><dd>Move between sparks</dd>
+              <dt><kbd>Ctrl</kbd> + click</dt><dd>Open in a new tab</dd>
+              <dt>Mouse middle click</dt><dd>Open in a new tab</dd>
+            </dl>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-edit"/></svg>Hotkeys in Edit</h3>
+          <div class="Setting">
+            <dl class="Keys">
+              <dt><kbd>Ctrl</kbd> <kbd>A</kbd></dt><dd>Select all sparks</dd>
+              <dt><kbd>Shift</kbd> + click</dt><dd>Select a range</dd>
+              <dt><kbd>Del</kbd></dt><dd>Delete what's selected</dd>
+              <dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo</dd>
+              <dt><kbd>Ctrl</kbd> <kbd>Y</kbd></dt><dd>Redo</dd>
+            </dl>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-undo"/></svg>Resets</h3>
+          <div class="Setting">
+            <div class="Buttons">
+              <button type="button" class="Button Button--warn" data-action="ask-delete-everything"><svg class="icon"><use href="#i-alert"/></svg>Delete all</button>
+              <button type="button" class="Button Button--warn" data-action="ask-start-over"><svg class="icon"><use href="#i-alert"/></svg>Start over</button>
+              <button type="button" class="Button" data-action="ask-reset-settings">Reset settings</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <hr class="Divider">
+      <p class="Modal__note Modal__foot"><span id="aboutVersion"></span><a href="https://github.com/sebastianstucke87/firedial" target="_blank" rel="noopener">github.com/sebastianstucke87/firedial</a><a href="LICENSES.txt" target="_blank" rel="noopener">Licenses</a></p>
+    </form>
+  </dialog>
+
+  <dialog class="Modal" id="importModal">
+    <form method="dialog">
+      <progress id="importProgress"></progress>
+      <p class="Modal__text" id="importDetail"></p>
+      <div class="Modal__actions">
+        <span class="Spacer"></span>
+        <button type="submit" class="Button Button--primary" id="importDone" hidden>Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/newtab.js"></script>
+</body>
+</html>
