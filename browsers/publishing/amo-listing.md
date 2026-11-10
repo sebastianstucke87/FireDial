@@ -51,11 +51,11 @@ search, privacy (AMO's fixed list has nothing closer; categories carry Tabs and 
 
 ## Homepage
 
-https://github.com/sebastianstucke87/firedial
+https://github.com/sebastianstucke87/FireDial
 
 ## Support site
 
-https://github.com/sebastianstucke87/firedial/issues
+https://github.com/sebastianstucke87/FireDial/issues
 
 ## Support email
 

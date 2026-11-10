@@ -376,7 +376,7 @@ test('About ends with the version, the address and the licenses, and warns in th
   await about()
   const lines = await js<string[]>("return [...document.querySelector('.Modal__foot').children].map((line) => line.textContent)")
   assert.match(lines[0] ?? '', /^FireDial 20\d\d\.\d{1,2}\.\d{1,2}\.\d{1,6}$/)
-  assert.equal(lines[1], 'github.com/sebastianstucke87/firedial')
+  assert.equal(lines[1], 'github.com/sebastianstucke87/FireDial')
   assert.equal(lines[2], 'Licenses')
   const license = await driver.executeAsyncScript<string>(
     'const done = arguments[0]; fetch(document.querySelector(\'.Modal__foot a[href="LICENSES.txt"]\').href).then((response) => response.text()).then(done)'

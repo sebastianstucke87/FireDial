@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FireDial",
   "description": "Minimal speed dial for your bookmarks! Completely free and open source: no ads, no account, no tracking, no BS.",
-  "homepage_url": "https://github.com/sebastianstucke87/firedial",
+  "homepage_url": "https://github.com/sebastianstucke87/FireDial",
   "browser_specific_settings": {
     "gecko": {
       "id": "firedial@sebastianstucke87.github.io",

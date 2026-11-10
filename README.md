@@ -17,8 +17,8 @@ Minimal speed dial for your bookmarks in Firefox! Completely free and open sourc
 Needs Node 26.
 
 ```bash
-git clone https://github.com/sebastianstucke87/firedial.git
-cd firedial
+git clone https://github.com/sebastianstucke87/FireDial.git
+cd FireDial
 npm ci
 npm run build
 ```
@@ -43,6 +43,6 @@ Or from your build, until Firefox restarts:
 
 ## Trust
 
-- FireDial is only published at github.com/sebastianstucke87/firedial and addons.mozilla.org/firefox/addon/firedial. Anything else claiming to be FireDial is fake: please report it.
+- FireDial is only published at github.com/sebastianstucke87/FireDial and addons.mozilla.org/firefox/addon/firedial. Anything else claiming to be FireDial is fake: please report it.
 - FireDial is not for sale.
-- Something odd? [Open an issue](https://github.com/sebastianstucke87/firedial/issues), or for security problems [report a vulnerability](https://github.com/sebastianstucke87/firedial/security/advisories/new) privately.
+- Something odd? [Open an issue](https://github.com/sebastianstucke87/FireDial/issues), or for security problems [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new) privately.
