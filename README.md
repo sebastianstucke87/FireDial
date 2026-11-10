@@ -1,4 +1,4 @@
-<img height="150" src="browsers/icons/icon.svg"/>
+<img height="150" src="browsers/publishing/amo-icon.png"/>
 
 # FireDial
 
