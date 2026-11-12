@@ -6,7 +6,8 @@
 name: Dependabot
 
 on:
-  workflow_run:
+  # Runs no pull request code: merge checks author, state and tested commit through the API, compare builds the merged commit on main.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [Release]
     types: [completed]
 

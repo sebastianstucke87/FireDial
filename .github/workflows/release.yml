@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+# Tools Dependabot can't update; the lockfile job warns once a newer release is 7 days old.
+env:
+  GH_ACTIONS_LOCK_VERSION: v0.4.1
+  ZIZMOR_VERSION: 1.32.0
+
 jobs:
   # actions.lock must match the workflows and every locked pin must still verify upstream.
   # After changing a `uses:` line, run `gh actions-lock` and commit the lockfile.
@@ -25,8 +30,32 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - run: gh extension install github/gh-actions-lock --pin v0.4.1
+      - run: gh extension install github/gh-actions-lock --pin "$GH_ACTIONS_LOCK_VERSION"
       - run: gh actions-lock --verify
+      # The same 7 days as the cooldown in .github/dependabot.yml.
+      - name: Warn about outdated tool versions
+        run: |
+          check() {
+            read -r tag date <<<"$(gh api "repos/$1/releases/latest" --jq '.tag_name + " " + .published_at')"
+            if [ "$tag" != "$2" ] && [ "$(date -d "$date" +%s)" -lt "$(date -d '7 days ago' +%s)" ]; then
+              echo "::warning::$1 $tag is out since $date, release.yml pins $2."
+            fi
+          }
+          check github/gh-actions-lock "$GH_ACTIONS_LOCK_VERSION"
+          check zizmorcore/zizmor "v$ZIZMOR_VERSION"
+
+  # Security audit of the workflows, see https://docs.zizmor.sh. Findings fail the job.
+  zizmor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          version: ${{ env.ZIZMOR_VERSION }}
+          advanced-security: false
 
   release:
     runs-on: ubuntu-24.04
@@ -39,10 +68,14 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7.1.0
+          persist-credentials: false
+      # No npm cache for a release: what is submitted is built from a clean install only.
+      # zizmor can't evaluate the cache expression, hence the ignore.
+      - uses: actions/setup-node@v7.1.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 26
-          cache: npm
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+          package-manager-cache: false
       - run: npm ci
 
       - name: Take the version from the tag
