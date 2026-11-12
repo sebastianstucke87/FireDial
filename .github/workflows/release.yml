@@ -14,6 +14,20 @@ permissions:
   contents: read
 
 jobs:
+  # actions.lock must match the workflows and every locked pin must still verify upstream.
+  # After changing a `uses:` line, run `gh actions-lock` and commit the lockfile.
+  lockfile:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - run: gh extension install github/gh-actions-lock --pin v0.4.1
+      - run: gh actions-lock --verify
+
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -22,10 +36,10 @@ jobs:
     env:
       RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -42,7 +56,7 @@ jobs:
       # Mutation testing: the unit tests must notice changed logic, see stryker.config.json for the bar.
       # Incremental: results of the last run are reused, only mutants in changed code or under changed tests run again.
       # A tag runs everything once more before it is released.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@v6.1.0
         if: env.RELEASE != 'true'
         with:
           path: reports/stryker-incremental.json
@@ -50,7 +64,7 @@ jobs:
           restore-keys: stryker-
       - id: mutate
         run: npm run mutate
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/save@v6.1.0
         if: always() && steps.mutate.outcome != 'skipped' && hashFiles('reports/stryker-incremental.json') != ''
         with:
           path: reports/stryker-incremental.json
