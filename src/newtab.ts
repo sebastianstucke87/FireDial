@@ -1,41 +1,63 @@
 // FireDial new tab page.
 
 import { backupName, exportParts, importSummary, readBackup } from './backup.ts'
-import { honeycomb, mainColor, markOn, textOn } from './color.ts'
+import { parseMap } from './bookmarks.ts'
+import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
+import { loadIcons } from './favicons.ts'
+import { planImport } from './import.ts'
 import {
   accentOf,
-  allocGroup,
+  addLabels,
+  addTo,
   allocSpark,
+  allocView,
+  arrange,
+  carries,
   clamp,
+  compareLabels,
   DEFAULT_PREFS,
-  GroupId,
+  deleteView,
   isColor,
-  isGroupId,
+  isLabelColor,
   isLayout,
   isSparkId,
   isTheme,
   isVanilla,
+  isViewId,
+  knownLabels,
+  labelKey,
   LimitError,
   LIMITS,
   MAX_COLUMNS,
   MAX_GROUP_WIDTH,
+  membersOf,
   MIN_COLUMNS,
   MIN_GROUP_WIDTH,
+  moveInView,
+  moveView,
   newThumbId,
+  nextViewName,
   normalizeUrl,
   plural,
+  removeFrom,
+  removeLabels,
+  renameView,
+  sameLabel,
   searchUrl,
   toHexColor,
   toLabel,
-  toSparkUrl
+  toSparkUrl,
+  ViewId,
+  viewTitled
 } from './model.ts'
-import type { Group, Label, Prefs, Spark, SparkId, ThumbId } from './model.ts'
+import type { LabelName, Prefs, Rule, Sort, Spark, SparkId, ThumbId, View } from './model.ts'
 import { browserKeyValue, Store, webLock } from './store.ts'
 import { THEME_KEY } from './theme-key.ts'
 import type { CommitOptions, ImportedData, Mutate } from './store.ts'
 import { sameItems, SelectionTrail } from './trail.ts'
 import { clearable } from './ui/clearable.ts'
+import { ChipField } from './ui/chipfield.ts'
 import { Confirm } from './ui/confirm.ts'
 import type { Question } from './ui/confirm.ts'
 import { $, $$, closest, el, html, icon, targetOf } from './ui/dom.ts'
@@ -59,6 +81,7 @@ const DENSITIES: readonly (readonly [string, number])[] = [
 ]
 const RESIZE_STEP = 10 // px per arrow key, five times that with Shift
 const MAX_HITS = 5
+const MAX_LABEL_HITS = 3
 const darkScheme = matchMedia('(prefers-color-scheme: dark)')
 const narrow = matchMedia('(max-width: 700px)') // read-only view; the same width as in newtab.css
 
@@ -66,19 +89,21 @@ const store = new Store(browserKeyValue, webLock)
 const thumbs = new Map<ThumbId, string>() // images never change, so this never goes stale
 const colors = new Map<ThumbId, string>()
 const selection = new Set<SparkId>()
-const markedGroups = new Set<GroupId>()
+const markedViews = new Set<ViewId>()
 
 interface Marks {
   sparks: SparkId[]
-  groups: GroupId[]
+  views: ViewId[]
 }
 
-const selectionTrail = new SelectionTrail<Marks>((a, b) => sameItems(a.sparks, b.sparks) && sameItems(a.groups, b.groups))
+const selectionTrail = new SelectionTrail<Marks>((a, b) => sameItems(a.sparks, b.sparks) && sameItems(a.views, b.views))
 
-type Drag = { type: 'spark'; ids: Set<SparkId> } | { type: 'group'; id: GroupId }
+type Drag = { type: 'spark'; ids: Set<SparkId> } | { type: 'view'; id: ViewId }
 
-let active = GroupId.parse(0)
+let active = ViewId.parse(0)
+let draftRule: { view: ViewId; rule: Rule } | null = null // a rule being edited, shown live
 let query = ''
+let pickedLabel: LabelName | null = null // a label picked in the search: its sparks, exactly
 let editing = false
 let drag: Drag | null = null
 let lastSelected = -1
@@ -93,16 +118,23 @@ const sparkIdOf = (node: HTMLElement): SparkId | null => {
   return isSparkId(id) ? id : null
 }
 
-const groupIdOf = (node: HTMLElement): GroupId | null => {
+const viewIdOf = (node: HTMLElement): ViewId | null => {
   const id = Number(node.dataset['id'] ?? NaN)
-  return isGroupId(id) ? id : null
+  return isViewId(id) ? id : null
 }
 
 const sparkById = (id: SparkId | null): Spark | undefined => store.doc.sparks.find((spark) => spark.id === id)
-const groupById = (id: GroupId | null): Group | undefined => store.doc.groups.find((group) => group.id === id)
+const viewById = (id: ViewId | null): View | undefined => store.doc.views.find((view) => view.id === id)
 const isTyping = (): boolean => document.activeElement?.matches('input:not([type=range]), textarea') ?? false
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
-const firstGroupId = (): GroupId => store.doc.groups[0]?.id ?? active
+// The views the sidebar lists: All and Unlabeled only when shown, or when there's no other view.
+function listedViews(views: readonly View[]): View[] {
+  const normal = views.filter((view) => view.kind === 'normal')
+  return store.doc.prefs.showBuiltIn || !normal.length ? [...views] : normal
+}
+const isListed = (id: ViewId): boolean => listedViews(store.doc.views).some((view) => view.id === id)
+const firstViewId = (): ViewId => listedViews(store.doc.views)[0]?.id ?? active
+const activeView = (): View | undefined => viewById(active)
 
 function hostOf(url: string): string {
   try {
@@ -199,35 +231,35 @@ async function change(mutate: Mutate, options: Omit<CommitOptions, 'active'> = {
 
 async function afterChange(): Promise<void> {
   selectionTrail.clear()
-  if (!groupById(active)) active = firstGroupId()
+  if (!isListed(active)) active = firstViewId()
   const known = new Set(store.doc.sparks.map((spark) => spark.id))
   for (const id of selection) {
     if (!known.has(id)) selection.delete(id)
   }
-  for (const id of markedGroups) {
-    if (!groupById(id)) markedGroups.delete(id)
+  for (const id of markedViews) {
+    if (!viewById(id)) markedViews.delete(id)
   }
-  void browserKeyValue.set({ activeGroup: active })
+  void browserKeyValue.set({ activeView: active })
   await render()
 }
 
-async function travel(step: Promise<GroupId | null>): Promise<void> {
+async function travel(step: Promise<ViewId | null>): Promise<void> {
   const shown = await step
-  if (shown !== null && groupById(shown)) active = shown
+  if (shown !== null && viewById(shown)) active = shown
   await afterChange()
 }
 
 function undo(): Promise<void> {
   const step = selectionTrail.undo(marks())
   if (!step) return travel(store.undo())
-  setSelection(step.sparks, step.groups)
+  setSelection(step.sparks, step.views)
   return Promise.resolve()
 }
 
 function redo(): Promise<void> {
   const step = selectionTrail.redo(marks())
   if (!step) return travel(store.redo())
-  setSelection(step.sparks, step.groups)
+  setSelection(step.sparks, step.views)
   return Promise.resolve()
 }
 
@@ -245,7 +277,7 @@ const thumbOf = (spark: Spark): string => (spark.thumb ? (thumbs.get(spark.thumb
 
 function render(): Promise<void> {
   applyPrefs()
-  renderGroups()
+  renderViews()
   renderSelection()
   return renderSparks()
 }
@@ -255,6 +287,9 @@ function settingValue(prefs: Prefs, name: string | undefined): string {
   if (name === 'counts') return prefs.showCounts ? 'on' : 'off'
   if (name === 'theme') return prefs.theme
   if (name === 'color') return prefs.color
+  if (name === 'labels') return prefs.showLabels ? 'on' : 'off'
+  if (name === 'builtIn') return prefs.showBuiltIn ? 'on' : 'off'
+  if (name === 'labelColor') return prefs.labelColor
   return prefs.layout
 }
 
@@ -289,6 +324,8 @@ function applyPrefs(): void {
   root.dataset['titles'] = prefs.showTitle ? 'on' : 'off'
   root.dataset['counts'] = prefs.showCounts ? 'on' : 'off'
   root.dataset['layout'] = prefs.layout
+  root.dataset['labels'] = prefs.showLabels ? 'on' : 'off'
+  root.dataset['labelColor'] = prefs.labelColor
   applyDensity(prefs.density)
   applyGroupWidth(prefs.groupWidth)
   applyColumns(prefs.columns)
@@ -299,6 +336,7 @@ function applyPrefs(): void {
   html('#options').hidden = !editing
   html('#history').hidden = !editing
   html('#trash').hidden = !editing
+  renderBulk()
   for (const button of $$('[data-setting] > button', HTMLButtonElement)) {
     button.setAttribute('aria-pressed', String(settingValue(prefs, button.parentElement?.dataset['setting']) === button.dataset['value']))
   }
@@ -345,52 +383,91 @@ function renderHistory(): void {
   $('#redo', HTMLButtonElement).disabled = !store.canRedo && !selectionTrail.canRedo
 }
 
-function renderGroups(): void {
-  const counts = new Map<GroupId, number>()
-  for (const { groupId } of store.doc.sparks) counts.set(groupId, (counts.get(groupId) ?? 0) + 1)
-  groupsNav.replaceChildren(...store.doc.groups.map((group) => groupItem(group, counts.get(group.id) ?? 0)))
-  groupPick.setChoices(groupChoices(), active)
+const SORT_CHOICES: Choice<Sort>[] = [
+  { value: 'manual', label: 'Custom' },
+  { value: 'name', label: 'Name' },
+  { value: 'address', label: 'Address' },
+  { value: 'date', label: 'Date added' }
+]
+
+// The doc as shown: with the rule being edited in place of the stored one.
+function shownDoc(): { views: View[]; sparks: Spark[] } {
+  const { views, sparks } = store.doc
+  const draft = draftRule
+  if (!draft) return { views, sparks }
+  return { views: views.map((view) => (view.id === draft.view ? { ...view, rule: draft.rule } : view)), sparks }
 }
 
-// The last one stays: sparks need a place to land.
-const canDeleteGroup = (): boolean => store.doc.groups.length > 1
-const groupChoices = (): Choice<GroupId>[] => store.doc.groups.map((group) => ({ value: group.id, label: group.title }))
+function renderViews(): void {
+  const shelf = shownDoc()
+  groupsNav.replaceChildren(...listedViews(shelf.views).map((view) => viewItem(view, membersOf(shelf, view).length)))
+  viewPick.setChoices(viewChoices(), active)
+  viewSort.setChoices(SORT_CHOICES, activeView()?.sort ?? 'manual')
+}
 
-// Not a link, so Firefox's context menu shows no link items for groups.
-function groupItem(group: Group, count: number): HTMLElement {
-  const isActive = group.id === active && !query
-  const input = el('input', { class: 'NameInput', maxlength: LIMITS.label, 'aria-label': 'Group name' })
-  input.value = group.title
+function chipStyle(label: LabelName): string {
+  if (store.doc.prefs.labelColor !== 'colorful') return ''
+  const color = labelColor(label.toLocaleLowerCase(), accentOf(store.doc.prefs))
+  return `--chip: ${color}; --on-chip: ${textOn(color)}`
+}
+
+const labelChip = (label: LabelName, remove = false): HTMLElement =>
+  el(
+    'span',
+    { class: 'Chip', 'data-label': label, style: chipStyle(label), title: label },
+    label,
+    remove && el('button', { type: 'button', class: 'Chip__remove', 'data-remove': label, 'aria-label': `Remove ${label}` }, icon('x'))
+  )
+
+const viewChoices = (): Choice<ViewId>[] => listedViews(store.doc.views).map((view) => ({ value: view.id, label: view.title }))
+
+// Not a link, so Firefox's context menu shows no link items for views.
+function viewItem(view: View, count: number): HTMLElement {
+  const isActive = view.id === active && !query
+  const input = el('input', { class: 'NameInput', maxlength: LIMITS.label, 'aria-label': 'View name' })
+  input.value = view.title
   editable(
     input,
     () => {
-      const title = toLabel(input.value)
-      if (title && title !== group.title) void renameGroup(group, title)
-      else input.value = group.title
+      if (input.value.trim() && input.value.trim() !== view.title) void renameViewTo(view.id, input.value)
+      else input.value = view.title
     },
     () => {
-      input.value = group.title
+      input.value = view.title
     }
   )
   return el(
     'div',
     {
-      class: `Group${isActive ? ' Group--active' : ''}${markedGroups.has(group.id) ? ' Group--marked' : ''}`,
+      class: `Group${isActive ? ' Group--active' : ''}${markedViews.has(view.id) ? ' Group--marked' : ''}`,
       role: 'button',
       tabindex: 0,
-      'data-id': group.id
+      'data-id': view.id,
+      'data-kind': view.kind
     },
     el('span', { class: 'Handle', draggable: true }, icon('grip')),
-    el('span', { class: 'Name' }, group.title),
+    el('span', { class: 'Name' }, view.title),
     input,
     el('small', {}, String(count))
   )
 }
 
 function visibleSparks(): Spark[] {
-  if (!query) return store.doc.sparks.filter((spark) => spark.groupId === active)
-  const needle = query.toLowerCase()
-  return store.doc.sparks.filter((spark) => spark.title.toLowerCase().includes(needle) || spark.url.toLowerCase().includes(needle))
+  if (!query) {
+    const view = activeView()
+    const shelf = shownDoc()
+    const shown = view ? shelf.views.find((each) => each.id === view.id) : undefined
+    return shown ? arrange(shelf, shown) : store.doc.sparks
+  }
+  const picked = pickedLabel
+  if (picked) return store.doc.sparks.filter((spark) => carries(spark, picked))
+  const needle = query.toLocaleLowerCase()
+  return store.doc.sparks.filter(
+    (spark) =>
+      spark.title.toLocaleLowerCase().includes(needle) ||
+      spark.url.toLocaleLowerCase().includes(needle) ||
+      spark.labels.some((label) => label.toLocaleLowerCase().includes(needle))
+  )
 }
 
 async function renderSparks(): Promise<void> {
@@ -470,7 +547,7 @@ function sparkTile(spark: Spark): HTMLElement {
       { class: 'Text' },
       el('div', { class: 'Title' }, spark.title || host),
       el('div', { class: 'Host' }, host || spark.url),
-      query && el('div', { class: 'In' }, `in ${groupById(spark.groupId)?.title ?? ''}`)
+      spark.labels.length > 0 && el('div', { class: 'Chips' }, ...[...spark.labels].sort(compareLabels).map((label) => labelChip(label)))
     ),
     el('button', { type: 'button', class: 'Strip EditSpark', 'aria-label': 'Edit', tabindex: -1 }, icon('edit'))
   )
@@ -515,9 +592,11 @@ function addSparkFromUrl(text: string): Promise<void> {
     notify('Not added: the URL is too long')
     return renderSparks()
   }
-  const groupId = active
+  const viewId = active
   return change((doc) => {
-    allocSpark(doc, { groupId, title: toLabel(titleFromUrl(url)), url, thumb: null })
+    const spark = allocSpark(doc, { title: toLabel(titleFromUrl(url)), url, thumb: null })
+    const view = doc.views.find((each) => each.id === viewId)
+    if (view) addTo([spark], view)
     return undefined
   })
 }
@@ -532,28 +611,37 @@ function renderSelection(): void {
     tile.classList.toggle('Spark--selected', id !== null && selection.has(id))
   }
   for (const row of $$('.Group', HTMLElement)) {
-    const id = groupIdOf(row)
-    row.classList.toggle('Group--marked', id !== null && markedGroups.has(id))
+    const id = viewIdOf(row)
+    row.classList.toggle('Group--marked', id !== null && markedViews.has(id))
   }
   renderTrash()
   renderHistory()
 }
 
-const marks = (): Marks => ({ sparks: [...selection], groups: [...markedGroups] })
-const markCount = (): number => selection.size + markedGroups.size
+const marks = (): Marks => ({ sparks: [...selection], views: [...markedViews] })
+const markCount = (): number => selection.size + markedViews.size
 
 function renderTrash(): void {
   const count = markCount()
   trash.classList.toggle('Trash--armed', count > 0)
   html('span', trash).textContent = drag ? 'Drop to delete' : count ? `Delete ${count}` : 'Delete'
+  renderBulk()
 }
 
-function setSelection(ids: Iterable<SparkId>, groups: Iterable<GroupId> = markedGroups): void {
-  const [nextSparks, nextGroups] = [[...ids], [...groups]]
+// What the band offers for marked sparks: labels, and taking them out of the open view.
+function renderBulk(): void {
+  const view = activeView()
+  labelBulk.hidden = !editing || !selection.size
+  removeButton.hidden = !editing || !selection.size || view?.kind !== 'normal' || Boolean(query)
+  html('span', removeButton).textContent = view ? `Remove from ${view.title}` : 'Remove'
+}
+
+function setSelection(ids: Iterable<SparkId>, views: Iterable<ViewId> = markedViews): void {
+  const [nextSparks, nextViews] = [[...ids], [...views]]
   selection.clear()
-  markedGroups.clear()
+  markedViews.clear()
   nextSparks.forEach((id) => selection.add(id))
-  nextGroups.forEach((id) => markedGroups.add(id))
+  nextViews.forEach((id) => markedViews.add(id))
   if (!selection.size) lastSelected = -1
   renderSelection()
 }
@@ -563,10 +651,10 @@ const clearSelection = (): void => {
 }
 
 // The user's own changes: these can be undone.
-function changeSelection(ids: Iterable<SparkId>, groups: Iterable<GroupId> = markedGroups): void {
-  const next = { sparks: [...new Set(ids)], groups: [...new Set(groups)] }
+function changeSelection(ids: Iterable<SparkId>, views: Iterable<ViewId> = markedViews): void {
+  const next = { sparks: [...new Set(ids)], views: [...new Set(views)] }
   selectionTrail.record(marks(), next)
-  setSelection(next.sparks, next.groups)
+  setSelection(next.sparks, next.views)
 }
 
 function toggleTile(tile: HTMLElement, range: boolean): void {
@@ -599,96 +687,129 @@ function setEditing(on: boolean): void {
     clearSelection()
   }
   applyPrefs()
-  renderGroups()
+  renderViews()
   void renderSparks()
 }
 
-// Changes to sparks and groups
+// Changes to sparks and views
 
-// All deleting ends here: what's marked, or the one item from a menu or the trash.
-async function deleteItems(sparks: ReadonlySet<SparkId>, groups: ReadonlySet<GroupId>): Promise<boolean> {
-  if (groups.size >= store.doc.groups.length) {
-    notify('One group has to stay')
-    return false
+// All deleting ends here: what's marked, or the one item from a menu or the trash. Views ask
+// whether their sparks go too; All and Unlabeled stay.
+async function deleteItems(sparks: ReadonlySet<SparkId>, views: ReadonlySet<ViewId>): Promise<boolean> {
+  const doomed = store.doc.views.filter((view) => views.has(view.id) && view.kind === 'normal')
+  let withSparks = false
+  if (doomed.length) {
+    const answer = await askDeleteViews(doomed)
+    if (!answer) return false
+    withSparks = answer === 'sparks'
   }
   await change((doc) => {
-    doc.sparks = doc.sparks.filter((spark) => !sparks.has(spark.id) && !groups.has(spark.groupId))
-    doc.groups = doc.groups.filter((group) => !groups.has(group.id))
+    doc.sparks = doc.sparks.filter((spark) => !sparks.has(spark.id))
+    for (const view of doc.views.filter((each) => views.has(each.id))) deleteView(doc, view, withSparks)
     return undefined
   })
   return true
 }
 
 const deleteSpark = (spark: Spark): Promise<boolean> => deleteItems(new Set([spark.id]), new Set())
-const deleteGroup = (group: Group): Promise<boolean> => deleteItems(new Set(), new Set([group.id]))
+const deleteOneView = (view: View): Promise<boolean> => deleteItems(new Set(), new Set([view.id]))
 
 async function deleteMarked(): Promise<void> {
-  if (markCount() && (await deleteItems(new Set(selection), new Set(markedGroups)))) clearSelection()
+  if (markCount() && (await deleteItems(new Set(selection), new Set(markedViews)))) clearSelection()
 }
 
-async function moveSparks(ids: ReadonlySet<SparkId>, groupId: GroupId): Promise<void> {
-  const count = store.doc.sparks.filter((spark) => ids.has(spark.id) && spark.groupId !== groupId).length
+// A drop on a view adds the sparks to it: they stay where they are too.
+async function addSparksTo(ids: ReadonlySet<SparkId>, viewId: ViewId): Promise<void> {
+  const view = viewById(viewId)
+  if (view?.kind !== 'normal') {
+    notify(`${view?.title ?? 'This view'} shows sparks by itself: drop them on a view of your own`)
+    return
+  }
+  let count = 0
   await change((doc) => {
-    const moving = doc.sparks.filter((spark) => ids.has(spark.id) && spark.groupId !== groupId)
-    const moved = new Set(moving.map((spark) => spark.id))
-    doc.sparks = [...doc.sparks.filter((spark) => !moved.has(spark.id)), ...moving.map((spark) => ({ ...spark, groupId }))]
+    const target = doc.views.find((each) => each.id === viewId)
+    if (target)
+      count = addTo(
+        doc.sparks.filter((spark) => ids.has(spark.id)),
+        target
+      )
     return undefined
   })
-  if (count) notify(`Moved ${plural(count, 'spark')} to ${groupById(groupId)?.title ?? ''}`)
+  notify(count ? `Added ${plural(count, 'spark')} to ${view.title}` : `In ${view.title} already`)
 }
 
-// Puts the sparks before or after the target spark; without a target, after the active group's last.
+async function removeFromActive(ids: ReadonlySet<SparkId>): Promise<void> {
+  const view = activeView()
+  if (view?.kind !== 'normal') return
+  let result = { changed: 0, stillShown: 0 }
+  await change((doc) => {
+    const target = doc.views.find((each) => each.id === view.id)
+    if (target)
+      result = removeFrom(
+        target,
+        doc.sparks.filter((spark) => ids.has(spark.id))
+      )
+    return undefined
+  })
+  clearSelection()
+  if (result.stillShown) notify(`${plural(result.stillShown, 'spark')} still shown: the filter picks them`)
+}
+
+// Puts the sparks before or after the target spark in the open view's order; without a target, at its end.
 function reorderSparks(ids: ReadonlySet<SparkId>, targetId: SparkId | null, after: boolean): Promise<void> {
-  const groupId = active
+  const viewId = active
   return change((doc) => {
-    const moving = doc.sparks.filter((spark) => ids.has(spark.id))
-    const rest = doc.sparks.filter((spark) => !ids.has(spark.id))
-    const index =
-      targetId === null
-        ? rest.findLastIndex((spark) => spark.groupId === groupId) + 1 || rest.length
-        : rest.findIndex((spark) => spark.id === targetId) + (after ? 1 : 0)
-    const targetGroup = targetId === null ? groupId : (rest.find((spark) => spark.id === targetId)?.groupId ?? groupId)
-    rest.splice(index, 0, ...moving.map((spark) => ({ ...spark, groupId: targetGroup })))
-    doc.sparks = rest
+    const view = doc.views.find((each) => each.id === viewId)
+    if (view) moveInView(doc, view, [...ids], targetId, after)
     return undefined
   })
 }
 
-function createGroup(title: Label): Promise<void> {
-  return change((doc) => allocGroup(doc, title).id)
+function createView(text: string, ids: ReadonlySet<SparkId> = new Set()): Promise<void> {
+  return change((doc) => {
+    const view = allocView(doc, text)
+    addTo(
+      doc.sparks.filter((spark) => ids.has(spark.id)),
+      view
+    )
+    return view.id
+  })
 }
 
-function renameGroup(group: Group, title: Label): Promise<void> {
+function renameViewTo(id: ViewId, text: string): Promise<void> {
   return change((doc) => {
-    const target = doc.groups.find((item) => item.id === group.id)
-    if (target) target.title = title
+    const view = doc.views.find((item) => item.id === id)
+    return view ? renameView(doc, view, text).id : undefined
+  })
+}
+
+function reorderView(id: ViewId, targetId: ViewId, after: boolean): Promise<void> {
+  return change((doc) => {
+    moveView(doc, id, targetId, after)
     return undefined
   })
 }
 
-function reorderGroup(id: GroupId, targetId: GroupId, after: boolean): Promise<void> {
-  if (id === targetId) return Promise.resolve()
-  return change((doc) => {
-    const moving = doc.groups.find((group) => group.id === id)
-    if (!moving) return undefined
-    const rest = doc.groups.filter((group) => group.id !== id)
-    rest.splice(rest.findIndex((group) => group.id === targetId) + (after ? 1 : 0), 0, moving)
-    doc.groups = rest
+function setSort(sort: Sort): void {
+  const viewId = active
+  void change((doc) => {
+    const view = doc.views.find((each) => each.id === viewId)
+    if (view) view.sort = sort
     return undefined
   })
 }
 
-function setActive(id: GroupId): void {
+function setActive(id: ViewId): void {
   lastSelected = -1
   active = id
-  void browserKeyValue.set({ activeGroup: id })
+  void browserKeyValue.set({ activeView: id })
   clearSearch(false)
   void render()
 }
 
-// Groups in the rail: rename inline (edit mode), new group
+// Views in the rail: rename inline (edit mode), new view
 
-function focusGroupName(id: GroupId): void {
+function focusViewName(id: ViewId): void {
   const input = document.querySelector(`.Group[data-id="${id}"] .NameInput`)
   if (!(input instanceof HTMLInputElement)) return
   input.focus()
@@ -698,22 +819,22 @@ function focusGroupName(id: GroupId): void {
 const groupsNav = html('#groups')
 const grid = html('#sparks')
 
-const groupPick = new Dropdown<GroupId>(html('#groupPick'), 'Group', setActive)
+const viewPick = new Dropdown<ViewId>(html('#groupPick'), 'View', setActive)
+const viewSort = new Dropdown<Sort>(html('#viewSort'), 'Sort', setSort)
 
 function startNewGroup(): void {
   const button = html('#newGroup')
   if (!button.isConnected) return
-  const input = el('input', { class: 'NewGroupInput', placeholder: 'Name group', maxlength: LIMITS.label, 'aria-label': 'Name group' })
+  const input = el('input', { class: 'NewGroupInput', placeholder: 'Name view', maxlength: LIMITS.label, 'aria-label': 'Name view' })
   button.replaceWith(input)
   input.focus()
   editable(
     input,
     () => {
       input.replaceWith(button)
-      const title = toLabel(input.value)
-      if (!title) return
+      if (!input.value.trim()) return
       clearSearch(false)
-      void createGroup(title)
+      void createView(input.value)
     },
     () => {
       input.value = ''
@@ -721,8 +842,9 @@ function startNewGroup(): void {
   )
 }
 
-// Search: filters sparks by title and URL; suggestions are the matching sparks plus a web
-// search. "@keyword " or an engine's alias picks the search engine.
+// Search: filters sparks by title, URL and labels; suggestions are the matching labels, then the
+// matching sparks, plus a web search. A label picked shows exactly its sparks. "@keyword " or an
+// engine's alias picks the search engine.
 
 interface Engine {
   name: string
@@ -776,6 +898,13 @@ function renderSuggest(): void {
   }
   const parsed = parseQuery(query)
   const hits = parsed.explicit ? [] : visibleSparks().slice(0, MAX_HITS)
+  const needle = labelKey(query)
+  const labelHits =
+    parsed.explicit || pickedLabel
+      ? []
+      : knownLabels(store.doc)
+          .filter((label) => labelKey(label).includes(needle))
+          .slice(0, MAX_LABEL_HITS)
   const url = searchUrl(query)
   const items = !url
     ? []
@@ -789,6 +918,16 @@ function renderSuggest(): void {
         )
       ]
   items.push(
+    ...labelHits.map((label) =>
+      el(
+        'div',
+        { class: 'SuggestItem', role: 'option', 'data-label': label },
+        icon('tag'),
+        el('span', {}, label),
+        el('small', {}, plural(store.doc.sparks.filter((spark) => carries(spark, label)).length, 'spark')),
+        el('kbd', {}, 'Enter')
+      )
+    ),
     ...hits.map((spark) => {
       const host = hostOf(spark.url)
       const title = spark.title || host
@@ -826,8 +965,11 @@ function highlight(index: number): void {
 
 function runSuggestion(item: HTMLElement | null | undefined, newTab: boolean): void {
   if (!item) return
-  const { id, url } = item.dataset
-  if (url) {
+  const { id, url, label } = item.dataset
+  const known = label === undefined ? undefined : knownLabels(store.doc).find((each) => sameLabel(each, label))
+  if (known) {
+    pickLabel(known)
+  } else if (url) {
     openUrl(url, newTab)
   } else if (id) {
     const spark = sparkById(sparkIdOf(item))
@@ -837,7 +979,18 @@ function runSuggestion(item: HTMLElement | null | undefined, newTab: boolean): v
   }
 }
 
+// The search shows exactly the sparks with this label.
+function pickLabel(label: LabelName): void {
+  searchInput.value = label
+  refreshSearchClear()
+  query = label
+  pickedLabel = label
+  suggestBox.hidden = true
+  void render()
+}
+
 function clearSearch(rerender = true): void {
+  pickedLabel = null
   searchInput.value = ''
   refreshSearchClear()
   suggestBox.hidden = true
@@ -852,7 +1005,9 @@ const focusFirstSpark = (): void => {
 
 searchInput.addEventListener('input', () => {
   query = searchInput.value.trim()
-  renderGroups()
+  pickedLabel = null
+  renderViews()
+  renderBulk()
   void renderSparks()
   renderSuggest()
 })
@@ -875,7 +1030,9 @@ searchInput.addEventListener('keydown', (event) => {
     else focusFirstSpark()
   } else if (event.key === 'Escape') {
     event.preventDefault()
-    if (searchInput.value) clearSearch()
+    if (open)
+      suggestBox.hidden = true // first the list, so the sparks it filters show
+    else if (searchInput.value) clearSearch()
     else searchInput.blur()
   }
 })
@@ -907,6 +1064,9 @@ function applySetting(prefs: Prefs, name: string, value: string): void {
   else if (name === 'theme' && isTheme(value)) prefs.theme = value
   else if (name === 'color' && isColor(value)) prefs.color = value
   else if (name === 'layout' && isLayout(value)) prefs.layout = value
+  else if (name === 'labels') prefs.showLabels = value === 'on'
+  else if (name === 'builtIn') prefs.showBuiltIn = value === 'on'
+  else if (name === 'labelColor' && isLabelColor(value)) prefs.labelColor = value
 }
 
 function changePrefs(edit: (prefs: Prefs) => void): Promise<void> {
@@ -1030,7 +1190,8 @@ customInput.addEventListener('keydown', (event) => {
 
 function applyNarrow(): void {
   searchInput.placeholder = narrow.matches ? 'Search' : 'Search or enter address'
-  groupPick.close()
+  viewPick.close()
+  viewSort.close()
   if (narrow.matches && editing) setEditing(false)
   else void renderSparks()
 }
@@ -1115,7 +1276,7 @@ async function importFile(file: File): Promise<string> {
   }
   showImport('Saving')
   await replaceData({ ...backup, sparks })
-  return importSummary(backup.groups.length, sparks.length, backup.skipped)
+  return importSummary(backup.views.filter((view) => view.kind === 'normal').length, sparks.length, backup.skipped)
 }
 
 // The page follows after Done, so the modal keeps its look until then.
@@ -1161,10 +1322,25 @@ async function copyUrl(spark: Spark): Promise<void> {
   notify('URL copied')
 }
 
-function openAll(group: Group): void {
-  const urls = store.doc.sparks.filter((spark) => spark.groupId === group.id).map((spark) => spark.url)
+const MANY_TABS = 15 // from here on, Open all asks first
+
+async function openAll(view: View): Promise<void> {
+  const urls = arrange(store.doc, view).map((spark) => spark.url)
+  if (!urls.length) {
+    notify(`${view.title} has no sparks`)
+    return
+  }
+  if (urls.length >= MANY_TABS && !(await confirm.ask({ title: 'Open all', text: `Open ${urls.length} tabs?`, button: 'Open', plain: true }))) return
   urls.forEach(openTab)
-  notify(urls.length ? `Opened ${plural(urls.length, 'tab')}` : `${group.title} has no sparks`)
+  notify(`Opened ${plural(urls.length, 'tab')}`)
+}
+
+// A new view with the marked sparks, or this one; named automatically, ready to rename.
+async function newViewFrom(spark: Spark): Promise<void> {
+  const ids = selection.has(spark.id) ? new Set(selection) : new Set([spark.id])
+  await createView(nextViewName(store.doc.views), ids)
+  clearSelection()
+  focusViewName(active)
 }
 
 function sparkMenu(spark: Spark): MenuEntry[] {
@@ -1177,40 +1353,57 @@ function sparkMenu(spark: Spark): MenuEntry[] {
   }
   const copy = { icon: 'copy', label: 'Copy URL', run: () => void copyUrl(spark) }
   if (narrow.matches) return [open, copy]
+  const labels = {
+    icon: 'tag',
+    label: 'Labels',
+    run: () => {
+      if (!selection.has(spark.id)) changeSelection([spark.id])
+      void openLabelModal()
+    }
+  }
+  const fromThese = { icon: 'plus', label: 'New view from these', run: () => void newViewFrom(spark) }
   return [
     open,
     { icon: 'edit', label: 'Edit', run: () => void openSparkModal(spark) },
+    ...(editing ? [labels, fromThese] : []),
     copy,
     { icon: 'trash', label: 'Delete', run: () => void deleteSpark(spark) }
   ]
 }
 
-function groupMenu(group: Group): MenuEntry[] {
+function viewMenu(view: View): MenuEntry[] {
+  const own =
+    view.kind === 'normal'
+      ? [
+          { icon: 'search', label: 'Edit', run: () => void openRuleModal(view) },
+          { icon: 'trash', label: 'Delete', run: () => void deleteOneView(view) }
+        ]
+      : []
   return [
     {
       icon: 'open',
       label: 'Open all',
-      run: () => {
-        openAll(group)
-      }
+      run: () => void openAll(view)
     },
     {
       icon: 'edit',
       label: 'Rename',
       run: () => {
         if (!editing) setEditing(true)
-        setActive(group.id)
-        focusGroupName(group.id)
+        setActive(view.id)
+        focusViewName(view.id)
       }
     },
-    ...(canDeleteGroup() ? [{ icon: 'trash', label: 'Delete', run: () => void deleteGroup(group) }] : [])
+    ...own
   ]
 }
 
 function pageMenu(): MenuEntry[] {
+  const view = activeView()
   return [
     { icon: 'plus', label: 'New spark', run: () => void openSparkModal() },
-    { icon: 'plus', label: 'New group', run: startNewGroup },
+    { icon: 'plus', label: 'New view', run: startNewGroup },
+    ...(editing && view?.kind === 'normal' && !query ? [{ icon: 'search', label: 'Edit view', run: () => void openRuleModal(view) }] : []),
     {
       icon: 'edit',
       label: editing ? 'Done' : 'Edit',
@@ -1229,10 +1422,10 @@ function menuFor(node: Element): MenuEntry[] | null {
     const spark = sparkById(sparkIdOf(tile))
     return spark ? sparkMenu(spark) : null
   }
-  const groupEl = node.closest('.Group')
-  if (groupEl instanceof HTMLElement) {
-    const group = groupById(groupIdOf(groupEl))
-    return group ? groupMenu(group) : null
+  const viewEl = node.closest('.Group')
+  if (viewEl instanceof HTMLElement) {
+    const view = viewById(viewIdOf(viewEl))
+    return view ? viewMenu(view) : null
   }
   return narrow.matches ? null : pageMenu()
 }
@@ -1261,7 +1454,9 @@ function closeMenu(): void {
 
 document.addEventListener('contextmenu', (event) => {
   const target = targetOf(event)
-  if (!target || target.closest('input, textarea, select, dialog')) return
+  // Text fields keep Firefox's own menu (cut, copy, paste), except a view's name not being typed in.
+  const naming = target?.closest('.NameInput') && target !== document.activeElement
+  if (!target || (!naming && target.closest('input, textarea, select, dialog'))) return
   if (target.closest('.ContextMenu')) {
     event.preventDefault()
     return
@@ -1284,7 +1479,6 @@ const sparkForm = sparkModal.form
 const sparkDrop = html('.Drop', sparkForm)
 const titleField = $('[name=title]', HTMLInputElement, sparkForm)
 const urlField = $('[name=url]', HTMLInputElement, sparkForm)
-const groupField = new Dropdown<GroupId>(html('#sparkGroup'), 'Group')
 const refreshTitleClear = clearable(titleField)
 const refreshUrlClear = clearable(urlField)
 const fileField = $('[name=file]', HTMLInputElement, sparkForm)
@@ -1294,6 +1488,18 @@ const fieldOf = (input: HTMLInputElement): HTMLElement => {
   return node
 }
 const clearThumb = $('[data-action="clear-thumb"]', HTMLButtonElement, sparkForm)
+const sparkLabelError = html('#sparkLabelError')
+const knownNow = (): LabelName[] => knownLabels(store.doc)
+const tooMany = (): boolean => sparkLabels.values.length > LIMITS.labelsPerSpark
+const sparkLabels = new ChipField(html('#sparkLabels'), {
+  known: knownNow,
+  chip: (label, remove) => labelChip(label, remove),
+  label: 'Labels',
+  onChange: () => {
+    sparkLabelError.textContent = tooMany() ? `A spark has at most ${LIMITS.labelsPerSpark} labels` : ''
+    sparkLabelError.hidden = !tooMany()
+  }
+})
 let draftSrc = ''
 
 // The preview and the clear buttons follow the draft and the fields.
@@ -1319,37 +1525,43 @@ async function openSparkModal(spark?: Spark): Promise<void> {
   titleField.value = spark?.title ?? ''
   urlField.value = spark?.url ?? ''
   fieldOf(urlField).classList.remove('Field--invalid')
-  const groupId = spark?.groupId ?? active
-  groupField.setChoices(groupChoices(), groupId)
+  const view = activeView()
   if (spark) await loadThumbs([spark])
   const srcBefore = spark ? thumbOf(spark) : ''
   draftSrc = srcBefore
+  sparkLabels.set(spark ? spark.labels : view?.kind === 'normal' ? [view.title] : [])
   renderPreview()
 
   if ((await sparkModal.open()) !== 'save') return
 
   const url = toSparkUrl(normalizeUrl(urlField.value))
-  const newGroup = groupField.value
-  if (!url || newGroup === null) return
+  if (!url) return
   const title = toLabel(titleField.value)
   const src = draftSrc
   const newThumb = src && src !== srcBefore ? newThumbId() : null
   const thumb = src === srcBefore ? (spark?.thumb ?? null) : newThumb
   if (newThumb) thumbs.set(newThumb, src)
+  const labels = [...sparkLabels.values]
   await change(
     (doc) => {
       const target = doc.sparks.find((item) => item.id === spark?.id)
-      if (target) Object.assign(target, { title, url, groupId: newGroup, thumb })
-      else allocSpark(doc, { groupId: newGroup, title, url, thumb })
+      if (target) Object.assign(target, { title, url, thumb, labels })
+      else allocSpark(doc, { title, url, thumb, labels })
       return undefined
     },
     newThumb ? { thumbs: { [newThumb]: src } } : {}
   )
-  if (newGroup !== groupId) notify(`${spark ? 'Moved' : 'Added'} to ${groupById(newGroup)?.title ?? ''}`)
 }
 
 // No usable URL, no save: mark the field instead of a browser tooltip. Registered before the modal's listener.
 sparkForm.addEventListener('submit', (event) => {
+  sparkLabels.commit()
+  if (tooMany()) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    sparkLabels.input.focus()
+    return
+  }
   if (urlField.value.trim() && toSparkUrl(normalizeUrl(urlField.value))) return
   event.preventDefault()
   event.stopImmediatePropagation()
@@ -1357,9 +1569,10 @@ sparkForm.addEventListener('submit', (event) => {
   urlField.focus()
 })
 
+// Only title and URL change the preview: redrawing it for other fields makes the image flash.
 sparkForm.addEventListener('input', (event) => {
   if (event.target === urlField) fieldOf(urlField).classList.remove('Field--invalid')
-  renderPreview()
+  if (event.target === urlField || event.target === titleField) renderPreview()
 })
 
 fileField.addEventListener('change', () => {
@@ -1401,7 +1614,7 @@ sparkDrop.addEventListener('drop', (event) => {
   renderPreview()
 })
 
-// Drag and drop: reorder sparks and groups, drop sparks onto a group to move them.
+// Drag and drop: reorder sparks and views, drop sparks onto a view to add them there too.
 
 // All of it works in edit mode only: elsewhere sparks are just links.
 
@@ -1435,6 +1648,12 @@ grid.addEventListener('dragstart', (event) => {
     const rect = tile.getBoundingClientRect()
     event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setDragImage(tile, event.clientX - rect.left, event.clientY - rect.top)
+    // Dropped outside FireDial, on Firefox's toolbar say: the address and the title, not the
+    // tile's whole text with its host and labels.
+    const dragged = store.doc.sparks.filter((spark) => ids.has(spark.id))
+    event.dataTransfer.setData('text/x-moz-url', dragged.map((spark) => `${spark.url}\n${spark.title || hostOf(spark.url)}`).join('\n'))
+    event.dataTransfer.setData('text/uri-list', dragged.map((spark) => spark.url).join('\r\n'))
+    event.dataTransfer.setData('text/plain', dragged.map((spark) => spark.url).join('\n'))
   }
   requestAnimationFrame(() => {
     for (const node of tiles()) {
@@ -1468,27 +1687,27 @@ grid.addEventListener('drop', (event) => {
 })
 
 groupsNav.addEventListener('dragstart', (event) => {
-  const groupEl = closest(event, '.Group')
-  const id = groupEl ? groupIdOf(groupEl) : null
-  if (!groupEl || id === null || closest(event, '.NameInput')) {
+  const viewEl = closest(event, '.Group')
+  const id = viewEl ? viewIdOf(viewEl) : null
+  if (!viewEl || id === null || closest(event, '.NameInput')) {
     event.preventDefault()
     return
   }
-  startDrag({ type: 'group', id })
+  startDrag({ type: 'view', id })
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', groupById(id)?.title ?? '')
-    event.dataTransfer.setDragImage(groupEl, 16, groupEl.offsetHeight / 2)
+    event.dataTransfer.setData('text/plain', viewById(id)?.title ?? '')
+    event.dataTransfer.setDragImage(viewEl, 16, viewEl.offsetHeight / 2)
   }
   requestAnimationFrame(() => {
-    groupEl.classList.add('Group--dragging')
+    viewEl.classList.add('Group--dragging')
   })
 })
 
 groupsNav.addEventListener('dragover', (event) => {
   const over = closest(event, '.Group')
   if (!drag || !over) return
-  if (drag.type === 'group' && groupIdOf(over) === drag.id) return
+  if (drag.type === 'view' && viewIdOf(over) === drag.id) return
   event.preventDefault()
   clearDropMarks()
   if (drag.type === 'spark') over.classList.add('Group--drop')
@@ -1501,7 +1720,7 @@ groupsNav.addEventListener('dragleave', (event) => {
 
 groupsNav.addEventListener('drop', (event) => {
   const over = closest(event, '.Group')
-  const target = over ? groupIdOf(over) : null
+  const target = over ? viewIdOf(over) : null
   if (!drag || !over || target === null) return
   event.preventDefault()
   const current = drag
@@ -1509,9 +1728,9 @@ groupsNav.addEventListener('drop', (event) => {
   endDrag()
   if (current.type === 'spark') {
     clearSelection()
-    void moveSparks(current.ids, target)
+    void addSparksTo(current.ids, target)
   } else {
-    void reorderGroup(current.id, target, after)
+    void reorderView(current.id, target, after)
   }
 })
 
@@ -1521,17 +1740,21 @@ function endDrag(): void {
   document.body.classList.remove('dragging')
   trash.classList.remove('Trash--over')
   renderTrash()
-  for (const node of $$('.Spark--dragging, .Group--dragging', Element)) node.classList.remove('Spark--dragging', 'Group--dragging')
+  for (const node of $$('.Spark--dragging, .Group--dragging', Element)) {
+    node.classList.remove('Spark--dragging', 'Group--dragging')
+  }
 }
 
 document.addEventListener('dragend', endDrag)
 
 // The trash: anything dragged here is deleted, and an item that's marked takes all marks along.
 
+const labelBulk = $('#labelBulk', HTMLButtonElement)
+const removeButton = $('#removeFromView', HTMLButtonElement)
 const trash = html('#trash')
 
 async function throwAway(dragged: Drag): Promise<void> {
-  const marked = dragged.type === 'spark' ? [...dragged.ids].some((id) => selection.has(id)) : markedGroups.has(dragged.id)
+  const marked = dragged.type === 'spark' ? [...dragged.ids].some((id) => selection.has(id)) : markedViews.has(dragged.id)
   if (marked) await deleteMarked()
   else if (dragged.type === 'spark') await deleteItems(dragged.ids, new Set())
   else await deleteItems(new Set(), new Set([dragged.id]))
@@ -1560,11 +1783,11 @@ trash.addEventListener('animationend', () => {
   trash.classList.remove('Trash--gulp')
 })
 
-// Edit mode: drag a box to select sparks and groups (Shift adds to it). It starts on empty space,
-// or on a group: there it waits for the mouse to move, because a click shows the group.
+// Edit mode: drag a box to select sparks and views (Shift adds to it). It starts on empty space,
+// or on a view: there it waits for the mouse to move, because a click shows the view.
 
 const main = html('#main')
-let band: { x: number; y: number; sparks: Set<SparkId>; groups: Set<GroupId>; before: Marks; box: HTMLElement | null } | null = null
+let band: { x: number; y: number; sparks: Set<SparkId>; views: Set<ViewId>; before: Marks; box: HTMLElement | null } | null = null
 let bandDrawn = false
 
 function startBand(event: PointerEvent): void {
@@ -1574,7 +1797,7 @@ function startBand(event: PointerEvent): void {
     x: event.clientX,
     y: event.clientY,
     sparks: new Set(adding ? selection : []),
-    groups: new Set(adding ? markedGroups : []),
+    views: new Set(adding ? markedViews : []),
     before: marks(),
     box: null
   }
@@ -1610,16 +1833,16 @@ document.addEventListener('pointermove', (event) => {
     return rect.left < left + width && rect.right > left && rect.top < top + height && rect.bottom > top
   }
   const sparks = new Set(band.sparks)
-  const groups = new Set(band.groups)
+  const views = new Set(band.views)
   for (const tile of tiles().filter(inBox)) {
     const id = sparkIdOf(tile)
     if (id !== null) sparks.add(id)
   }
   for (const row of $$('.Group', HTMLElement).filter(inBox)) {
-    const id = groupIdOf(row)
-    if (id !== null) groups.add(id)
+    const id = viewIdOf(row)
+    if (id !== null) views.add(id)
   }
-  setSelection(sparks, groups)
+  setSelection(sparks, views)
 })
 
 const endBand = (): void => {
@@ -1648,8 +1871,11 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
   'new-group': startNewGroup,
   trash: () => {
     if (markCount()) void deleteMarked()
-    else notify('Drag sparks or groups here to delete them')
+    else notify('Drag sparks or views here to delete them')
   },
+  'label-bulk': () => void openLabelModal(),
+  'remove-from-view': () => void removeFromActive(new Set(selection)),
+  'import-bookmarks': () => void importBookmarks(),
   export: () => void exportData(),
   import: () => void askImport(),
   upload: () => {
@@ -1695,6 +1921,16 @@ document.addEventListener('click', (event) => {
     return
   }
 
+  const chip = closest(event, '#sparks .Chip')?.dataset['label']
+  const chipLabel = chip === undefined ? undefined : knownLabels(store.doc).find((each) => sameLabel(each, chip))
+  if (chipLabel) {
+    event.preventDefault()
+    const chipView = viewTitled(store.doc.views, chipLabel)
+    if (chipView && isListed(chipView.id)) setActive(chipView.id)
+    else pickLabel(chipLabel)
+    return
+  }
+
   const add = closest(event, '#sparks .AddSpark')
   if (add) {
     openAddTile(add)
@@ -1718,9 +1954,9 @@ document.addEventListener('click', (event) => {
     return // the link opens the spark
   }
 
-  const groupEl = closest(event, '.Group')
-  const group = groupEl ? groupById(groupIdOf(groupEl)) : undefined
-  if (group && !bandDrawn && !closest(event, '.NameInput')) setActive(group.id)
+  const viewEl = closest(event, '.Group')
+  const view = viewEl ? viewById(viewIdOf(viewEl)) : undefined
+  if (view && !bandDrawn && !closest(event, '.NameInput')) setActive(view.id)
 })
 
 document.addEventListener('auxclick', (event) => {
@@ -1757,10 +1993,10 @@ document.addEventListener('keydown', (event) => {
   }
 
   const focused = document.activeElement
-  const groupEl = focused?.closest('.Group')
-  if (groupEl instanceof HTMLElement && (event.key === 'Enter' || event.key === ' ')) {
+  const viewEl = focused?.closest('.Group')
+  if (viewEl instanceof HTMLElement && (event.key === 'Enter' || event.key === ' ')) {
     event.preventDefault()
-    const id = groupIdOf(groupEl)
+    const id = viewIdOf(viewEl)
     if (id !== null) setActive(id)
     return
   }
@@ -1819,20 +2055,266 @@ function openAbout(): void {
 const aboutModal = new Modal($('#aboutModal', HTMLDialogElement), 'FireDial')
 const confirm = new Confirm()
 
-const IMPORT: Question = { title: 'Import', text: 'Import a backup. This will replace all FireDial bookmarks, sparks and groups.', button: 'Import' }
+// Firefox's bookmarks, once: read only, into labels and views; then each site's icon, which is
+// what the access to all sites is for. It ends with the import.
+
+const ICON_SIZE = 96 // px at most: under SMALL_IMAGE, so it shows as an icon
+const ALL_SITES = { origins: ['<all_urls>'] }
+
+const dropSiteAccess = (): Promise<unknown> => browser.permissions.remove(ALL_SITES).catch(() => false)
+
+// Access to all sites is asked for only with something to import, by the Import button itself.
+async function importBookmarks(): Promise<void> {
+  aboutModal.close()
+  const [root] = await browser.bookmarks.getTree()
+  const { bookmarkMap } = await browserKeyValue.get('bookmarkMap')
+  const plan = root ? planImport(root, store.doc, parseMap(bookmarkMap).root) : null
+  if (!plan?.sparks.length) {
+    notify(plan?.known ? 'Nothing new to import' : 'No bookmarks to import')
+    return
+  }
+  let access: Promise<boolean> = Promise.resolve(false)
+  const sure = await confirm.ask(
+    {
+      title: 'Import bookmarks',
+      text: `Import ${plural(plan.sparks.length, 'bookmark')} from ${plural(plan.folders, 'folder')}${plan.known ? ` (${plan.known} ${plan.known === 1 ? 'is' : 'are'} in FireDial already)` : ''}. Folders become labels; top folders also become views. Firefox's bookmarks stay as they are.`,
+      button: 'Import'
+    },
+    () => {
+      access = browser.permissions.request(ALL_SITES).catch(() => false)
+    }
+  )
+  if (!sure) return
+  const allowed = await access
+  if (!allowed) {
+    notify('Not imported: FireDial needs access to the sites for their icons')
+    return
+  }
+  const added = new Set<SparkId>()
+  await change((doc) => {
+    for (const title of plan.views) if (!viewTitled(doc.views, title)) allocView(doc, title)
+    for (const spark of plan.sparks) added.add(allocSpark(doc, { ...spark, thumb: null }).id)
+    return undefined
+  })
+  if (added.size) notify(`Imported ${plural(added.size, 'bookmark')}${plan.views.length ? `, ${plural(plan.views.length, 'new view')}` : ''}`)
+  await loadSparkIcons(added)
+}
+
+function originOf(url: string): string | null {
+  try {
+    const { origin, protocol } = new URL(url)
+    return /^https?:$/.test(protocol) ? origin : null
+  } catch {
+    return null
+  }
+}
+
+// An answer as a small PNG, if it's an image at all. Through an <img>, which reads ICO and SVG too.
+async function iconImage(response: Response): Promise<string | null> {
+  const blob = await response.blob()
+  if (!blob.type.startsWith('image/')) return null
+  const url = URL.createObjectURL(blob)
+  try {
+    const img = el('img', { src: url, alt: '' })
+    await img.decode()
+    const width = img.naturalWidth || ICON_SIZE
+    const height = img.naturalHeight || ICON_SIZE
+    const scale = Math.min(1, ICON_SIZE / Math.max(width, height))
+    const canvas = el('canvas', { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) })
+    canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png')
+  } catch {
+    return null
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+async function loadSparkIcons(ids: ReadonlySet<SparkId>): Promise<void> {
+  try {
+    const wanted = store.doc.sparks.filter((spark) => ids.has(spark.id) && !spark.thumb)
+    const origins = [...new Set(wanted.map((spark) => originOf(spark.url)).filter((origin) => origin !== null))]
+    if (!origins.length) return
+    const icons = await loadIcons(origins, iconImage)
+    const chosen = new Map<SparkId, ThumbId>()
+    const images: Record<ThumbId, string> = {}
+    for (const spark of wanted) {
+      const origin = originOf(spark.url)
+      const src = origin ? icons.get(origin) : undefined
+      if (!src) continue
+      const id = newThumbId()
+      chosen.set(spark.id, id)
+      images[id] = src
+      thumbs.set(id, src)
+    }
+    if (chosen.size) {
+      await change(
+        (doc) => {
+          for (const spark of doc.sparks) {
+            const thumb = chosen.get(spark.id)
+            if (thumb && !spark.thumb) spark.thumb = thumb
+          }
+          return undefined
+        },
+        { thumbs: images }
+      )
+    }
+  } finally {
+    await dropSiteAccess()
+  }
+}
+
+// Labels for every marked spark: add some, or remove some.
+const labelModal = new Modal($('#labelModal', HTMLDialogElement), 'Labels')
+const bulkLabels = new ChipField(html('#bulkLabels'), {
+  known: knownNow,
+  chip: (label, remove) => labelChip(label, remove),
+  label: 'Labels'
+})
+let bulkMode: 'add' | 'remove' = 'add'
+
+// No label, no closing. Registered before the modal's listener.
+labelModal.form.addEventListener('submit', (event) => {
+  bulkMode = event.submitter instanceof HTMLButtonElement && event.submitter.value === 'remove' ? 'remove' : 'add'
+  bulkLabels.commit()
+  if (bulkLabels.values.length) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  bulkLabels.input.focus()
+})
+
+async function openLabelModal(): Promise<void> {
+  const ids = new Set(selection)
+  if (!ids.size) return
+  html('#labelModalText').textContent = `Add or remove these labels on ${plural(ids.size, 'spark')}.`
+  bulkLabels.set([])
+  if ((await labelModal.open()) !== 'save') return
+  const labels = [...bulkLabels.values]
+  const mode = bulkMode
+  await change((doc) => {
+    const marked = doc.sparks.filter((spark) => ids.has(spark.id))
+    if (mode === 'add') addLabels(marked, labels)
+    else removeLabels(marked, labels)
+    return undefined
+  })
+}
+
+// Editing a view's filter: it starts with all sparks or none, includes the sparks with some
+// labels and excludes those with others. The grid shows the result while the dialog is open.
+const ruleModal = new Modal($('#ruleModal', HTMLDialogElement), 'Edit')
+const ruleAll = html('#ruleAll')
+// From all sparks the labels narrow the view down (Require), from none they add to it (Include).
+const INCLUDE_WORDS = {
+  all: ['Require', 'Keeps only sparks with all of these labels.', '#i-funnel'],
+  none: ['Include', 'Adds sparks with any of these labels.', '#i-plus']
+} as const
+let ruleView: ViewId | null = null
+
+// The labels a filter can pick: all but the view's own, and none that's in the other field already.
+const ruleLabels = (other: () => readonly LabelName[]): LabelName[] => {
+  const view = ruleView === null ? undefined : viewById(ruleView)
+  return knownLabels(store.doc).filter((label) => !(view && sameLabel(label, view.title)) && !other().some((each) => sameLabel(each, label)))
+}
+const labelCount = (label: LabelName): number => store.doc.sparks.filter((spark) => carries(spark, label)).length
+const ruleField = (id: string, label: string, other: () => readonly LabelName[]): ChipField =>
+  new ChipField(html(id), {
+    known: () => ruleLabels(other),
+    chip: (name, remove) => labelChip(name, remove),
+    label,
+    count: labelCount,
+    onChange: () => {
+      previewRule()
+    }
+  })
+const ruleInclude: ChipField = ruleField('#ruleInclude', 'Include', () => ruleExclude.values)
+const ruleExclude: ChipField = ruleField('#ruleExclude', 'Exclude', () => ruleInclude.values)
+
+const ruleBaseAll = (): boolean =>
+  $$('button', HTMLButtonElement, ruleAll).some((button) => button.dataset['value'] === 'on' && button.getAttribute('aria-pressed') === 'true')
+
+function renderRuleAll(on: boolean): void {
+  for (const button of $$('button', HTMLButtonElement, ruleAll)) button.setAttribute('aria-pressed', String((button.dataset['value'] === 'on') === on))
+  const [head, note, symbol] = on ? INCLUDE_WORDS.all : INCLUDE_WORDS.none
+  $('#ruleIncludeIcon use', SVGUseElement).setAttribute('href', symbol)
+  html('#ruleIncludeHead').textContent = head
+  html('#ruleIncludeNote').textContent = note
+  ruleInclude.input.setAttribute('aria-label', head)
+}
+
+// The grid follows the dialog; nothing is saved yet.
+function previewRule(): void {
+  if (ruleView === null) return
+  draftRule = { view: ruleView, rule: { all: ruleBaseAll(), include: [...ruleInclude.values], exclude: [...ruleExclude.values] } }
+  renderViews()
+  void renderSparks()
+}
+
+async function openRuleModal(view: View): Promise<void> {
+  if (view.kind !== 'normal') return
+  setActive(view.id)
+  ruleView = null // no preview while the fields are filled
+  renderRuleAll(view.rule.all)
+  ruleInclude.set(view.rule.include)
+  ruleExclude.set(view.rule.exclude)
+  ruleView = view.id
+  previewRule()
+  const saved = (await ruleModal.open()) === 'save'
+  ruleInclude.commit()
+  ruleExclude.commit()
+  previewRule()
+  const rule = draftRule?.rule
+  draftRule = null
+  ruleView = null
+  if (!saved || !rule) {
+    void render()
+    return
+  }
+  await change((doc) => {
+    const target = doc.views.find((each) => each.id === view.id)
+    if (target) target.rule = rule
+    return undefined
+  })
+}
+
+ruleAll.addEventListener('click', (event) => {
+  const button = closest(event, 'button')
+  if (!button) return
+  renderRuleAll(button.dataset['value'] === 'on')
+  previewRule()
+})
+
+// Deleting views: the views alone, their labels staying on the sparks, or their sparks with them.
+const deleteViewModal = new Modal($('#deleteViewModal', HTMLDialogElement), 'Delete')
+let deleteChoice = ''
+deleteViewModal.form.addEventListener('submit', (event) => {
+  deleteChoice = event.submitter instanceof HTMLButtonElement ? event.submitter.value : ''
+})
+
+async function askDeleteViews(views: readonly View[]): Promise<'view' | 'sparks' | null> {
+  const names = views.length === 1 ? (views[0]?.title ?? '') : plural(views.length, 'view')
+  const own = store.doc.sparks.filter((spark) => views.some((view) => spark.labels.some((label) => sameLabel(label, view.title)))).length
+  deleteViewModal.title = `Delete ${names}`
+  html('#deleteViewText').textContent = own ? `Delete ${names} only, or with ${own === 1 ? 'its spark' : `its ${plural(own, 'spark')}`}?` : `Delete ${names}?`
+  $('#deleteViewModal [value=sparks]', HTMLButtonElement).hidden = !own
+  deleteChoice = ''
+  if ((await deleteViewModal.open()) !== 'save') return null
+  return deleteChoice === 'sparks' ? 'sparks' : 'view'
+}
+
+const IMPORT: Question = { title: 'Import', text: 'Import a backup. This will replace all FireDial bookmarks, sparks and views.', button: 'Import' }
 const DELETE_EVERYTHING: Question = {
   title: 'Delete all',
-  text: 'Delete all. This will delete all FireDial bookmarks, sparks and groups.',
+  text: 'Delete all. This will delete all FireDial bookmarks, sparks and views.',
   button: 'Delete all'
 }
 const START_OVER: Question = {
   title: 'Start over',
-  text: 'Start over with the sparks and settings FireDial comes with. This will replace all FireDial bookmarks, sparks and groups.',
+  text: 'Start over with the sparks and settings FireDial comes with. This will replace all FireDial bookmarks, sparks and views.',
   button: 'Start over'
 }
 const RESET_SETTINGS: Question = {
   title: 'Reset settings',
-  text: 'Reset settings back to their defaults. This is safe for bookmarks, sparks and groups.',
+  text: 'Reset settings back to their defaults. This is safe for bookmarks, sparks and views.',
   button: 'Reset settings'
 }
 
@@ -1847,18 +2329,16 @@ async function resetSettings(): Promise<void> {
   await changePrefs((prefs) => {
     Object.assign(prefs, DEFAULT_PREFS)
   })
-  notify('Settings reset')
 }
 
 // The bookmarks in the FireDial folder go too: left there, they would come back as sparks.
 async function deleteEverything(): Promise<void> {
   try {
     const saved = await autoBackup('deleted')
-    await replaceData({ groups: [], sparks: [], prefs: { ...DEFAULT_PREFS } })
+    await replaceData({ views: [], sparks: [], prefs: { ...DEFAULT_PREFS } })
     setEditing(false)
     await afterChange()
     if (saved) notify('Backup saved')
-    notify('Everything deleted')
   } catch (error) {
     notify(errorText(error))
   }
@@ -1873,7 +2353,6 @@ async function startOver(): Promise<void> {
     setEditing(false)
     await afterChange()
     if (saved) notify('Backup saved')
-    notify('Started over')
   } catch (error) {
     notify(errorText(error))
   }
@@ -1881,8 +2360,8 @@ async function startOver(): Promise<void> {
 
 async function start(): Promise<void> {
   if (!('browser' in globalThis)) throw new Error('browser API missing')
-  const [, { activeGroup, reveal }, stored] = await Promise.all([store.load(), browserKeyValue.get(['activeGroup', 'reveal']), store.colors()])
-  active = isGroupId(activeGroup) && groupById(activeGroup) ? activeGroup : firstGroupId()
+  const [, { activeView: last, reveal }, stored] = await Promise.all([store.load(), browserKeyValue.get(['activeView', 'reveal']), store.colors()])
+  active = isViewId(last) && isListed(last) ? last : firstViewId()
   revealing = isSparkId(reveal) ? reveal : null
   for (const [id, color] of stored) colors.set(id, color)
 }

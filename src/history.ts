@@ -1,9 +1,10 @@
 // Undo steps: only what a change touched, so thousands of them stay small. A step holds both
-// sides of the change: the groups and sparks it touched, and the order of the groups it reordered.
+// sides of the change: the views and sparks it touched, and the order of views or sparks if it
+// changed. A view's own order is part of the view.
 
 import * as z from 'zod/mini'
 
-import { canonicalize, Group, GroupId, listOf, normalizePrefs, Spark, SparkId } from './model.ts'
+import { canonicalize, listOf, normalizePrefs, Spark, SparkId, View, ViewId } from './model.ts'
 import type { Doc, Prefs, ThumbId } from './model.ts'
 
 interface SparkChange {
@@ -11,23 +12,18 @@ interface SparkChange {
   value: Spark | null // null: the spark doesn't exist on this side
 }
 
-interface GroupChange {
-  id: GroupId
-  value: Group | null
-}
-
-interface SparkOrder {
-  groupId: GroupId
-  ids: SparkId[]
+interface ViewChange {
+  id: ViewId
+  value: View | null
 }
 
 interface Side {
   sparks: SparkChange[]
-  groups: GroupChange[]
-  sparkOrders: SparkOrder[]
-  groupOrder: GroupId[] | null
+  views: ViewChange[]
+  sparkOrder: SparkId[] | null
+  viewOrder: ViewId[] | null
   prefs: Prefs | null
-  active: GroupId | null // the group to show after going to this side
+  active: ViewId | null // the view to show after going to this side
 }
 
 export interface Step {
@@ -36,16 +32,6 @@ export interface Step {
 }
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
-
-function sparkIdsByGroup(doc: Doc): Map<GroupId, SparkId[]> {
-  const byGroup = new Map<GroupId, SparkId[]>()
-  for (const { id, groupId } of doc.sparks) {
-    const ids = byGroup.get(groupId)
-    if (ids) ids.push(id)
-    else byGroup.set(groupId, [id])
-  }
-  return byGroup
-}
 
 function changes<Item extends { id: number }>(from: readonly Item[], to: readonly Item[]): { id: Item['id']; before: Item | null; after: Item | null }[] {
   const old = new Map<Item['id'], Item>(from.map((item) => [item.id, item]))
@@ -59,35 +45,30 @@ function changes<Item extends { id: number }>(from: readonly Item[], to: readonl
   return result
 }
 
+const ids = (items: readonly { id: number }[]): number[] => items.map((item) => item.id)
+
 // null when nothing changed.
-export function diff(before: Doc, after: Doc, activeBefore: GroupId | null, activeAfter: GroupId | null): Step | null {
+export function diff(before: Doc, after: Doc, activeBefore: ViewId | null, activeAfter: ViewId | null): Step | null {
   const sparks = changes(before.sparks, after.sparks)
-  const groups = changes(before.groups, after.groups)
-  const groupIds = new Set([...before.groups, ...after.groups].map((group) => group.id))
-  const [idsBefore, idsAfter] = [sparkIdsByGroup(before), sparkIdsByGroup(after)]
-  const orders = [...groupIds]
-    .map((groupId) => ({ groupId, from: idsBefore.get(groupId) ?? [], to: idsAfter.get(groupId) ?? [] }))
-    .filter(({ from, to }) => !same(from, to))
-  const groupOrderChanged = !same(
-    before.groups.map((group) => group.id),
-    after.groups.map((group) => group.id)
-  )
+  const views = changes(before.views, after.views)
+  const sparkOrderChanged = !same(ids(before.sparks), ids(after.sparks))
+  const viewOrderChanged = !same(ids(before.views), ids(after.views))
   const prefsChanged = !same(before.prefs, after.prefs)
-  if (!sparks.length && !groups.length && !orders.length && !groupOrderChanged && !prefsChanged) return null
+  if (!sparks.length && !views.length && !sparkOrderChanged && !viewOrderChanged && !prefsChanged) return null
   return {
     before: {
       sparks: sparks.map(({ id, before: value }) => ({ id, value })),
-      groups: groups.map(({ id, before: value }) => ({ id, value })),
-      sparkOrders: orders.map(({ groupId, from }) => ({ groupId, ids: from })),
-      groupOrder: groupOrderChanged ? before.groups.map((group) => group.id) : null,
+      views: views.map(({ id, before: value }) => ({ id, value })),
+      sparkOrder: sparkOrderChanged ? before.sparks.map((spark) => spark.id) : null,
+      viewOrder: viewOrderChanged ? before.views.map((view) => view.id) : null,
       prefs: prefsChanged ? before.prefs : null,
       active: activeBefore
     },
     after: {
       sparks: sparks.map(({ id, after: value }) => ({ id, value })),
-      groups: groups.map(({ id, after: value }) => ({ id, value })),
-      sparkOrders: orders.map(({ groupId, to }) => ({ groupId, ids: to })),
-      groupOrder: groupOrderChanged ? after.groups.map((group) => group.id) : null,
+      views: views.map(({ id, after: value }) => ({ id, value })),
+      sparkOrder: sparkOrderChanged ? after.sparks.map((spark) => spark.id) : null,
+      viewOrder: viewOrderChanged ? after.views.map((view) => view.id) : null,
       prefs: prefsChanged ? after.prefs : null,
       active: activeAfter
     }
@@ -103,27 +84,20 @@ function applyChanges<Item extends { id: number }>(items: readonly Item[], list:
   return [...byId.values()]
 }
 
-function ranked<Id>(ids: readonly Id[]): (id: Id) => number {
-  const rank = new Map(ids.map((id, index) => [id, index]))
-  return (id) => rank.get(id) ?? ids.length
+// Items in the order given; those it doesn't know keep their place among themselves, at the end.
+function sortBy(items: { id: number }[], order: readonly number[]): void {
+  const rank = new Map(order.map((id, index) => [id, index]))
+  items.sort((a, b) => (rank.get(a.id) ?? order.length) - (rank.get(b.id) ?? order.length))
 }
 
 // Sets the doc to this side of a step. Things changed by others since then stay as they are.
 export function applySide(doc: Doc, side: Side): void {
   doc.sparks = applyChanges(doc.sparks, side.sparks)
-  doc.groups = applyChanges(doc.groups, side.groups)
+  doc.views = applyChanges(doc.views, side.views)
   if (side.prefs) doc.prefs = side.prefs
-  if (side.groupOrder) {
-    const rank = ranked(side.groupOrder)
-    doc.groups.sort((a, b) => rank(a.id) - rank(b.id))
-  }
+  if (side.viewOrder) sortBy(doc.views, side.viewOrder)
+  if (side.sparkOrder) sortBy(doc.sparks, side.sparkOrder)
   canonicalize(doc)
-  for (const { groupId, ids } of side.sparkOrders) {
-    const rank = ranked(ids)
-    const sorted = doc.sparks.filter((spark) => spark.groupId === groupId).sort((a, b) => rank(a.id) - rank(b.id))
-    let next = 0
-    doc.sparks = doc.sparks.map((spark) => (spark.groupId === groupId ? (sorted[next++] ?? spark) : spark))
-  }
 }
 
 export function stepThumbs(step: Step): ThumbId[] {
@@ -132,14 +106,14 @@ export function stepThumbs(step: Step): ThumbId[] {
 
 const SideSchema = z.object({
   sparks: listOf(z.object({ id: SparkId, value: z.catch(z.nullable(Spark), null) })),
-  groups: listOf(z.object({ id: GroupId, value: z.catch(z.nullable(Group), null) })),
-  sparkOrders: listOf(z.object({ groupId: GroupId, ids: listOf(SparkId) })),
-  groupOrder: z.catch(z.nullable(listOf(GroupId)), null),
+  views: listOf(z.object({ id: ViewId, value: z.catch(z.nullable(View), null) })),
+  sparkOrder: z.catch(z.nullable(listOf(SparkId)), null),
+  viewOrder: z.catch(z.nullable(listOf(ViewId)), null),
   prefs: z.pipe(
     z.optional(z.unknown()),
     z.transform((prefs: unknown) => (prefs ? normalizePrefs(prefs) : null))
   ),
-  active: z.catch(z.nullable(GroupId), null)
+  active: z.catch(z.nullable(ViewId), null)
 })
 
 const StepSchema = z.catch(z.nullable(z.object({ before: SideSchema, after: SideSchema })), null)

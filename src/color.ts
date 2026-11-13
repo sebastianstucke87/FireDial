@@ -83,6 +83,34 @@ function hslToHex(hue: number, saturation: number, lightness: number): string {
   return `#${channel(0)}${channel(8)}${channel(4)}`
 }
 
+const LABEL_AWAY = 30 // degrees of hue kept clear on both sides of the accent
+const LABEL_SATURATIONS = [0.85, 0.7]
+const LABEL_LIGHTNESSES = [0.8, 0.72, 0.86]
+
+// The hue of #rrggbb, 0-360; null for a grey.
+function hueOf(color: string): number | null {
+  const [red = 0, green = 0, blue = 0] = [1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16) / 255)
+  const most = Math.max(red, green, blue)
+  const range = most - Math.min(red, green, blue)
+  if (range < 0.05) return null
+  const sector = most === red ? (green - blue) / range : most === green ? (blue - red) / range + 2 : (red - green) / range + 4
+  return (sector * 60 + 360) % 360
+}
+
+// A label's own pastel in the colorful setting: the same for the same name on every device, the
+// hue spread over the whole circle except next to the accent, so a chip never looks like a button.
+export function labelColor(label: string, accent: string): string {
+  let hash = 0x811c9dc5 // FNV-1a
+  for (const char of label) hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 0x01000193) >>> 0
+  const away = hueOf(accent)
+  const free = away === null ? 360 : 360 - 2 * LABEL_AWAY
+  const start = away === null ? 0 : away + LABEL_AWAY
+  const hue = (start + ((hash % 3600) / 3600) * free) % 360
+  const saturation = LABEL_SATURATIONS[(hash >>> 12) % LABEL_SATURATIONS.length] ?? 0.8
+  const lightness = LABEL_LIGHTNESSES[(hash >>> 16) % LABEL_LIGHTNESSES.length] ?? 0.8
+  return hslToHex(hue, saturation, lightness)
+}
+
 const HONEYCOMB_RADIUS = 3
 const HONEYCOMB_CENTER = '#3f3f46'
 const HONEYCOMB_SATURATION = 0.85

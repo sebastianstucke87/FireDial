@@ -1,5 +1,6 @@
 // Every dialog: flame and title on top, a close button as long as it can be dismissed. The page's
-// markup holds only what's inside: a <dialog> with a <form>. [data-close] buttons close it.
+// markup holds only what's inside: a <dialog> with a <form>. [data-close] buttons close it. The head
+// and the buttons (or a footer after a divider) stay in sight; what's between them scrolls.
 
 import { $, closest, el, icon } from './dom.ts'
 
@@ -13,7 +14,9 @@ export class Modal {
   constructor(dialog: HTMLDialogElement, title: string, dismissible = true) {
     this.dialog = dialog
     this.form = $('form', HTMLFormElement, dialog)
-    this.form.prepend(el('header', { class: 'Modal__head' }, el('h2', { class: 'Modal__title' }, icon('flame'), this.titleText), this.closeButton))
+    const end = [...this.form.children].findIndex((child) => child.matches('.Modal__actions, .Divider'))
+    const body = el('div', { class: 'Modal__body' }, ...[...this.form.children].slice(0, end < 0 ? undefined : end))
+    this.form.prepend(el('header', { class: 'Modal__head' }, el('h2', { class: 'Modal__title' }, icon('flame'), this.titleText), this.closeButton), body)
     this.title = title
     this.dismissible = dismissible
     dialog.addEventListener('click', (event) => {
@@ -47,6 +50,9 @@ export class Modal {
       const done = (result: string): void => {
         form.removeEventListener('submit', onSubmit)
         dialog.removeEventListener('close', onClose)
+        // A field of a closed dialog keeps no focus, so the page's keys work again.
+        const focused = document.activeElement
+        if (focused instanceof HTMLElement && dialog.contains(focused)) focused.blur()
         resolve(result)
       }
       // Resolve on submit itself: the close event can lag behind (e.g. in a background tab).

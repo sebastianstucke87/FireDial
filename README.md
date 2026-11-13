@@ -9,7 +9,7 @@ Minimal speed dial for your bookmarks in Firefox! Completely free and open sourc
 <p>
   <img width="32%" src="browsers/screenshots/dark.png" alt="FireDial in dark, Violet, tiles"/>
   <img width="32%" src="browsers/screenshots/edit.png" alt="FireDial in Edit, dark, Teal"/>
-  <img width="32%" src="browsers/screenshots/list.png" alt="FireDial in light, Rose, list"/>
+  <img width="32%" src="browsers/screenshots/list.png" alt="FireDial in light, light blue, list, with colorful labels"/>
 </p>
 
 ## Install
@@ -18,9 +18,10 @@ From addons.mozilla.org: https://addons.mozilla.org/firefox/addon/firedial/
 
 ## Usage
 
-- Right-click any page, link or tab: **Add to FireDial**.
-- **Edit** (top right) holds all settings; **About** lists the keyboard shortcuts.
-- Sparks are bookmarks in **Other Bookmarks → FireDial**, so Firefox Sync carries them. Images stay on this device.
+- Right-click a page, link or tab: **Add to FireDial**.
+- **Edit**: settings. **About**: shortcuts, bookmark import.
+- Views filter sparks by label, e.g. _Work or News_, _all but Private_.
+- Sparks are bookmarks (**Other Bookmarks → FireDial**), so Firefox Sync carries them. Images stay local.
 
 ## Build
 
@@ -41,6 +42,6 @@ To load your build until Firefox restarts:
 
 ## Trust
 
-- FireDial is only published at github.com/sebastianstucke87/FireDial and addons.mozilla.org/firefox/addon/firedial. Anything else claiming to be FireDial is fake: please report it.
+- FireDial is only published at `github.com/sebastianstucke87/FireDial` and `addons.mozilla.org/firefox/addon/firedial`. Anything else claiming to be FireDial is fake; report it.
 - FireDial is not for sale.
-- Something odd? [Open an issue](https://github.com/sebastianstucke87/FireDial/issues), or for security problems [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new) privately.
+- Something odd? [Open an issue](https://github.com/sebastianstucke87/FireDial/issues) or [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new).

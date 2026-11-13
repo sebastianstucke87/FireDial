@@ -10,23 +10,23 @@ import * as z from 'zod/mini'
 import { applySide, diff, parseStep, stepKey, stepThumbs } from './history.ts'
 import type { Step } from './history.ts'
 import {
-  allocGroup,
   allocSpark,
   canonicalize,
   checkLimits,
   emptyDoc,
-  Group,
-  GroupId,
   isThumbId,
   LIMITS,
+  makeView,
   newThumbId,
   normalizePrefs,
   Spark,
   Text,
   ThumbId,
-  validItems
+  validItems,
+  View,
+  ViewId
 } from './model.ts'
-import type { Doc, Label, Prefs, SparkUrl } from './model.ts'
+import type { Doc, Label, LabelName, Prefs, Rule, Sort, SparkId, SparkUrl } from './model.ts'
 
 export interface KeyValue {
   get(keys: string | string[]): Promise<Record<string, unknown>>
@@ -59,8 +59,8 @@ export const webLock: Lock = (task) => navigator.locks.request('firedial', { sig
 
 export const thumbKey = (id: ThumbId): string => `thumb:${id}`
 
-const SCHEMA = 3
-const STATE_KEYS = ['schema', 'rev', 'groups', 'sparks', 'prefs', 'nextIds', 'history']
+const SCHEMA = 4
+const STATE_KEYS = ['schema', 'rev', 'views', 'sparks', 'prefs', 'nextIds', 'history']
 const THUMB_CHUNK = 200 // images per storage write on import
 
 interface HistoryMeta {
@@ -75,38 +75,43 @@ interface State {
   history: HistoryMeta
 }
 
-export interface ImportedGroup {
-  key: number
-  title: Label
+// A view from outside: its order by the sparks' keys.
+export interface ImportedView {
+  kind: View['kind']
+  title: LabelName
+  sort: Sort
+  rule: Rule
+  order: number[]
 }
 
 export interface ImportedSpark {
-  groupKey: number
+  key: number
   title: Label
   url: SparkUrl
   src: string
+  labels: LabelName[]
 }
 
 export interface ImportedData {
-  groups: ImportedGroup[]
+  views: ImportedView[]
   sparks: ImportedSpark[]
   prefs: Prefs
 }
 
 export interface CommitOptions {
   thumbs?: Readonly<Record<ThumbId, string>> // new images the change refers to
-  active?: GroupId // the group shown while changing, for undo to return to
+  active?: ViewId // the view shown while changing, for undo to return to
   unchecked?: boolean // from outside FireDial: over-limit data is kept rather than refused
   ifRevision?: number // only if the store is still at this revision
 }
 
-// A change: edits the doc it gets, and may return the group to show afterwards.
-export type Mutate = (doc: Doc) => GroupId | undefined
+// A change: edits the doc it gets, and may return the view to show afterwards.
+export type Mutate = (doc: Doc) => ViewId | undefined
 
 const Position = z.pipe(z.coerce.number(), z.int())
 const HistoryMetaSchema = z.catch(z.object({ first: Position, cursor: Position, end: Position }), { first: 0, cursor: 0, end: 0 })
 const Revision = z.catch(z.coerce.number(), 0)
-const NextIds = z.catch(z.object({ group: Revision, spark: Revision }), { group: 0, spark: 0 })
+const NextIds = z.catch(z.object({ view: Revision, spark: Revision }), { view: 0, spark: 0 })
 const List = z.catch(z.array(z.unknown()), [])
 const Colors = z.catch(z.record(z.string(), z.unknown()), {})
 
@@ -114,10 +119,10 @@ function parseState(data: Record<string, unknown>): State {
   const fallback = emptyDoc()
   const ids = NextIds.parse(data['nextIds'])
   const doc: Doc = {
-    groups: validItems(Group, List.parse(data['groups'])),
+    views: validItems(View, List.parse(data['views'])),
     sparks: validItems(Spark, List.parse(data['sparks'])),
     prefs: normalizePrefs(data['prefs']),
-    nextGroupId: ids.group || fallback.nextGroupId,
+    nextViewId: ids.view || fallback.nextViewId,
     nextSparkId: ids.spark || fallback.nextSparkId
   }
   canonicalize(doc)
@@ -125,18 +130,18 @@ function parseState(data: Record<string, unknown>): State {
 }
 
 const docItems = (doc: Doc): Record<string, unknown> => ({
-  groups: doc.groups,
+  views: doc.views,
   sparks: doc.sparks,
   prefs: doc.prefs,
-  nextIds: { group: doc.nextGroupId, spark: doc.nextSparkId }
+  nextIds: { view: doc.nextViewId, spark: doc.nextSparkId }
 })
 
 // The parts of the doc a step touched: the others stay out of the write and out of onChanged.
 function changedItems(doc: Doc, { after }: Step): Record<string, unknown> {
-  const { groups, sparks, prefs, nextIds } = docItems(doc)
+  const { views, sparks, prefs, nextIds } = docItems(doc)
   return {
-    ...(after.groups.length || after.groupOrder ? { groups } : {}),
-    ...(after.sparks.length || after.sparkOrders.length ? { sparks } : {}),
+    ...(after.views.length || after.viewOrder ? { views } : {}),
+    ...(after.sparks.length || after.sparkOrder ? { sparks } : {}),
     ...(after.prefs ? { prefs } : {}),
     nextIds
   }
@@ -241,16 +246,16 @@ export class Store {
     })
   }
 
-  // Both return the group to show, if the step knows one.
-  undo(): Promise<GroupId | null> {
+  // Both return the view to show, if the step knows one.
+  undo(): Promise<ViewId | null> {
     return this.travel(-1)
   }
 
-  redo(): Promise<GroupId | null> {
+  redo(): Promise<ViewId | null> {
     return this.travel(1)
   }
 
-  private travel(direction: -1 | 1): Promise<GroupId | null> {
+  private travel(direction: -1 | 1): Promise<ViewId | null> {
     return this.lock(async () => {
       const state = await this.read()
       const { first, cursor, end } = state.history
@@ -272,21 +277,24 @@ export class Store {
 
   // Import: replaces all data and can't be undone. Ids carry on from the old doc, so nothing
   // that still refers to an old id (another tab, the bookmark map) can mix them up.
-  replaceAll(data: ImportedData): Promise<GroupId> {
+  replaceAll(data: ImportedData): Promise<ViewId> {
     return this.lock(async () => {
       const state = await this.read()
       const { thumbIndex } = await this.kv.get('thumbIndex')
-      const doc: Doc = { groups: [], sparks: [], prefs: data.prefs, nextGroupId: state.doc.nextGroupId, nextSparkId: state.doc.nextSparkId }
-      const groupIds = new Map(data.groups.map((group) => [group.key, allocGroup(doc, group.title).id]))
+      const doc: Doc = { views: [], sparks: [], prefs: data.prefs, nextViewId: state.doc.nextViewId, nextSparkId: state.doc.nextSparkId }
       const thumbs = new Map<ThumbId, string>()
+      const sparkIds = new Map<number, SparkId>()
       for (const spark of data.sparks) {
-        const groupId = groupIds.get(spark.groupKey) ?? doc.groups[0]?.id
-        if (groupId === undefined) continue
         const thumb = spark.src ? newThumbId() : null
         if (thumb) thumbs.set(thumb, spark.src)
-        allocSpark(doc, { groupId, title: spark.title, url: spark.url, thumb })
+        sparkIds.set(spark.key, allocSpark(doc, { title: spark.title, url: spark.url, thumb, labels: spark.labels }).id)
       }
-      canonicalize(doc)
+      for (const { kind, title, sort, rule, order } of data.views) {
+        const view = makeView(ViewId.parse(doc.nextViewId), kind, title)
+        doc.nextViewId += 1
+        doc.views.push({ ...view, sort, rule, order: order.flatMap((key) => sparkIds.get(key) ?? []) })
+      }
+      canonicalize(doc) // a title twice: the first one stays; All and Unlabeled get their own rules
       checkLimits(doc)
       const entries = [...thumbs]
       for (let start = 0; start < entries.length; start += THUMB_CHUNK) {
@@ -296,7 +304,7 @@ export class Store {
       await this.kv.set({ ...docItems(doc), rev: state.rev + 1, history, thumbIndex: [...thumbs.keys()] })
       await this.kv.remove(['thumbColors', ...stepKeys(state.history.first, state.history.end), ...parseThumbIndex(thumbIndex).map(thumbKey)])
       this.adopt({ doc, rev: state.rev + 1, history })
-      return doc.groups[0]?.id ?? GroupId.parse(0)
+      return doc.views.find((view) => view.kind === 'all')?.id ?? ViewId.parse(0)
     })
   }
 

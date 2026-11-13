@@ -2,9 +2,9 @@
 
 import * as z from 'zod/mini'
 
-import { LabelText, LimitError, LIMITS, listOf, normalizePrefs, plural, Text, toLabel, toSparkUrl } from './model.ts'
+import { LabelText, LimitError, LIMITS, listOf, normalizePrefs, plural, Text, toLabelNames, toSparkUrl, View } from './model.ts'
 import type { Doc, ThumbId } from './model.ts'
-import type { ImportedData, ImportedGroup, ImportedSpark } from './store.ts'
+import type { ImportedData, ImportedSpark, ImportedView } from './store.ts'
 
 interface Parsed extends ImportedData {
   skipped: number // sparks left out because their URL is too long or empty
@@ -19,30 +19,29 @@ export function backupName(now: Date, auto: boolean): string {
   return `firedial_${date}_${time}${auto ? '_autobackup' : ''}.json`
 }
 
-export function importSummary(groups: number, sparks: number, skipped: number): string {
-  return `Imported ${plural(groups, 'group')} with ${plural(sparks, 'spark')}${skipped ? `, skipped ${skipped} (URL empty or too long)` : ''}`
+export function importSummary(views: number, sparks: number, skipped: number): string {
+  return `Imported ${plural(views, 'view')} with ${plural(sparks, 'spark')}${skipped ? `, skipped ${skipped} (URL empty or too long)` : ''}`
 }
 
-// In parts, so the file may get bigger than a single string can.
+// In parts, so the file may get bigger than a single string can. No version number: an import
+// reads what a file has (labels, say) and takes defaults for what it hasn't.
 export function exportParts(doc: Doc, images: ReadonlyMap<ThumbId, string>): string[] {
-  const { format, version, prefs, groups } = { format: 'firedial', version: 1, prefs: doc.prefs, groups: doc.groups }
+  const { format, prefs, views } = { format: 'firedial', prefs: doc.prefs, views: doc.views }
   const sparks = doc.sparks.map((spark, index) => {
     const { thumb, ...fields } = spark
     return `${index ? ',' : ''}${JSON.stringify({ ...fields, thumb: thumb ? (images.get(thumb) ?? '') : '' })}`
   })
-  return [
-    `{"format":${JSON.stringify(format)},"version":${version},"prefs":${JSON.stringify(prefs)},"groups":${JSON.stringify(groups)},"sparks":[`,
-    ...sparks,
-    ']}'
-  ]
+  return [`{"format":${JSON.stringify(format)},"prefs":${JSON.stringify(prefs)},"views":${JSON.stringify(views)},"sparks":[`, ...sparks, ']}']
 }
 
 const Key = z.catch(z.coerce.number(), Number.NaN)
 
+// Views come as they were saved: order by the sparks' ids in the file. A file without views is
+// from a version with groups, which isn't read any more.
 const BackupFile = z.object({
   format: z.literal('firedial'),
-  groups: listOf(z.object({ id: Key, title: LabelText })),
-  sparks: listOf(z.object({ groupId: Key, title: LabelText, url: Text, thumb: z.catch(z.string(), '') })),
+  views: z.array(z.unknown()),
+  sparks: listOf(z.object({ id: Key, title: LabelText, url: Text, thumb: z.catch(z.string(), ''), labels: z.catch(z.array(z.unknown()), []) })),
   prefs: z.optional(z.unknown())
 })
 
@@ -62,17 +61,21 @@ export function parseBackup(data: unknown): Parsed {
   const file = BackupFile.safeParse(data)
   if (!file.success) throw new Error('Unknown file format')
   const raw = file.data
-  let groups: ImportedGroup[] = raw.groups.map(({ id, title }) => ({ key: id, title }))
-  if (!groups.length) groups = [{ key: 0, title: toLabel('Home') }]
-  const known = new Set(groups.map((group) => group.key))
-  const firstKey = groups[0]?.key ?? 0
   const sparks: ImportedSpark[] = []
-  for (const { groupId, title, url: text, thumb } of raw.sparks) {
+  for (const { id, title, url: text, thumb, labels } of raw.sparks) {
     const url = toSparkUrl(text)
-    if (url) sparks.push({ groupKey: known.has(groupId) ? groupId : firstKey, title, url, src: thumb })
+    if (url) sparks.push({ key: id, title, url, src: thumb, labels: toLabelNames(labels) })
   }
-  if (groups.length > LIMITS.groups) throw new LimitError(`The file has ${groups.length} groups, FireDial holds at most ${LIMITS.groups}`)
+  const views: ImportedView[] = []
+  for (const item of raw.views) {
+    if (typeof item !== 'object' || item === null) continue
+    const view = View.safeParse({ ...item, id: 0 })
+    if (!view.success) continue
+    const { kind, title, sort, rule, order } = view.data
+    views.push({ kind, title, sort, rule, order })
+  }
+  if (views.length > LIMITS.views) throw new LimitError(`The file has ${views.length} views, FireDial holds at most ${LIMITS.views}`)
   if (sparks.length > LIMITS.sparks) throw new LimitError(`The file has ${sparks.length} sparks, FireDial holds at most ${LIMITS.sparks}`)
   if (!sparks.length) throw new Error('The file has no sparks, so nothing was imported')
-  return { groups, sparks, prefs: normalizePrefs(raw.prefs), skipped: raw.sparks.length - sparks.length }
+  return { views, sparks, prefs: normalizePrefs(raw.prefs), skipped: raw.sparks.length - sparks.length }
 }

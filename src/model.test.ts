@@ -3,19 +3,22 @@ import { test } from 'node:test'
 
 import {
   accentOf,
-  allocGroup,
+  addLabels,
   allocSpark,
+  allocView,
   canonicalize,
   checkLimits,
   DEFAULT_PREFS,
   emptyDoc,
-  GroupId,
   isVanilla,
+  labelProblem,
   LimitError,
   LIMITS,
-  nextGroupName,
+  makeView,
+  nextViewName,
   normalizePrefs,
   normalizeUrl,
+  removeLabels,
   searchUrl,
   Spark,
   SparkId,
@@ -23,8 +26,12 @@ import {
   Text,
   toHexColor,
   toLabel,
-  toSparkUrl
+  toLabelName,
+  toSparkUrl,
+  View,
+  ViewId
 } from './model.ts'
+import type { Doc, LabelName } from './model.ts'
 
 test('the search box opens what looks like an address', () => {
   assert.equal(searchUrl('https://a.example/x?y=1'), 'https://a.example/x?y=1')
@@ -75,14 +82,15 @@ test('FireDial is vanilla until something in it changed', () => {
       doc.prefs.customColor = '#123456'
     },
     (doc: ReturnType<typeof emptyDoc>) => {
-      allocGroup(doc, toLabel('Second'))
+      allocView(doc, 'Second')
     },
     (doc: ReturnType<typeof emptyDoc>) => {
-      doc.groups = [{ id: GroupId.parse(5), title: toLabel('Renamed') }]
+      const [all] = doc.views
+      if (all) all.sort = 'date'
     },
     (doc: ReturnType<typeof emptyDoc>) => {
       const url = toSparkUrl('https://a.example/')
-      if (url) allocSpark(doc, { groupId: GroupId.parse(0), title: toLabel('a'), url, thumb: null })
+      if (url) allocSpark(doc, { title: toLabel('a'), url, thumb: null })
     }
   ]
   for (const change of changes) {
@@ -110,7 +118,7 @@ test('text from outside: numbers count, labels and addresses are trimmed', () =>
   assert.equal(Text.parse({}), '')
   assert.equal(toLabel('  a  '), 'a')
   assert.equal(toSparkUrl('  https://a.example/ '), 'https://a.example/')
-  assert.equal(Spark.parse({ id: 0, groupId: 0, title: ' a ', url: ' https://a.example/ ' }).url, 'https://a.example/')
+  assert.equal(Spark.parse({ id: 0, title: ' a ', url: ' https://a.example/ ' }).url, 'https://a.example/')
   assert.equal(toHexColor(' #ABC '), '#aabbcc')
 })
 
@@ -143,7 +151,10 @@ test('the default settings, and the accent of each color', () => {
     customColor: '#3f3f46',
     showTitle: true,
     showCounts: true,
-    layout: 'wide'
+    layout: 'wide',
+    showLabels: true,
+    showBuiltIn: true,
+    labelColor: 'monochrome'
   })
   assert.deepEqual(emptyDoc().prefs, DEFAULT_PREFS)
   const accents = (['firedial', 'rose', 'berry', 'violet', 'ocean', 'teal', 'forest', 'custom'] as const).map((color) => accentOf({ ...DEFAULT_PREFS, color }))
@@ -151,51 +162,132 @@ test('the default settings, and the accent of each color', () => {
   assert.deepEqual([normalizePrefs({ showTitle: 'x' }).showTitle, normalizePrefs({ showCounts: 'x' }).showCounts], [true, true])
 })
 
-test('new groups and sparks get the next ids', () => {
+test('new views and sparks get the next ids', () => {
   const doc = emptyDoc()
-  assert.deepEqual([allocGroup(doc, toLabel('a')).id, allocGroup(doc, toLabel('b')).id, doc.nextGroupId], [1, 2, 3])
+  assert.deepEqual([allocView(doc, 'a').id, allocView(doc, 'b').id, doc.nextViewId], [2, 3, 4])
 })
 
-test('a new group is numbered one above the highest "New Group #n"', () => {
-  const titles = ['New Group #2', 'x New Group #20', 'New Group #30x', 'New Group #12', 'Other']
-  assert.equal(nextGroupName(titles.map((title, id) => ({ id: GroupId.parse(id), title: toLabel(title) }))), 'New Group #13')
+test('a new view is numbered one above the highest "New View #n"', () => {
+  const titles = ['New View #2', 'x New View #20', 'New View #30x', 'New View #12', 'Other']
+  const views = titles.flatMap((title, id) => {
+    const name = toLabelName(title)
+    return name ? [makeView(ViewId.parse(id), 'normal', name)] : []
+  })
+  assert.equal(nextViewName(views), 'New View #13')
 })
 
-test('a doc without groups gets Home, and a spark whose group is gone joins the first group', () => {
-  const doc = { ...emptyDoc(), groups: [], nextGroupId: 5 }
-  allocSpark(doc, { groupId: GroupId.parse(7), title: toLabel('a'), url: SparkUrl.parse('https://a.example/'), thumb: null })
+test('a doc always has All and Unlabeled once, and each normal title once', () => {
+  const doc: Doc = { ...emptyDoc(), views: [], nextViewId: 5 }
   canonicalize(doc)
-  assert.deepEqual(doc.groups, [{ id: 5, title: 'Home' }])
-  assert.equal(doc.nextGroupId, 6)
   assert.deepEqual(
-    doc.sparks.map((spark) => [spark.groupId, spark.title]),
-    [[5, 'a']]
+    doc.views.map((view) => [view.id, view.kind, view.title]),
+    [
+      [6, 'all', 'All'],
+      [5, 'unlabeled', 'Unlabeled']
+    ]
+  )
+  const work = toLabelName('Work')
+  assert.ok(work)
+  doc.views.push(makeView(ViewId.parse(9), 'normal', work), makeView(ViewId.parse(10), 'normal', work), makeView(ViewId.parse(11), 'all', work))
+  canonicalize(doc)
+  assert.deepEqual(
+    doc.views.map((view) => view.id),
+    [6, 5, 9]
   )
 })
 
 test('the limits themselves are allowed, one more is not', () => {
   const doc = emptyDoc()
   const url = SparkUrl.parse('https://a.example/')
-  const fill = (groups: number, sparks: number, perGroup: boolean): void => {
-    doc.groups = Array.from({ length: groups }, (_, id) => ({ id: GroupId.parse(id), title: toLabel('g') }))
-    doc.sparks = Array.from({ length: sparks }, (_, id) => ({
-      id: SparkId.parse(id),
-      groupId: GroupId.parse(perGroup ? 0 : id % groups),
-      title: toLabel('s'),
-      url,
-      thumb: null
-    }))
+  const fill = (views: number, sparks: number): void => {
+    doc.views = Array.from({ length: views }, (_, id) => makeView(ViewId.parse(id), 'normal', name(`v${id}`)))
+    doc.sparks = Array.from({ length: sparks }, (_, id) => ({ id: SparkId.parse(id), title: toLabel('s'), url, thumb: null, labels: [] }))
   }
-  fill(LIMITS.groups, 0, false)
+  fill(LIMITS.views, 0)
   checkLimits(doc)
-  fill(LIMITS.groups + 1, 0, false)
-  assert.throws(() => checkLimits(doc), new LimitError(`FireDial holds at most ${LIMITS.groups} groups`))
-  fill(LIMITS.groups, LIMITS.sparks, false)
+  fill(LIMITS.views + 1, 0)
+  assert.throws(() => checkLimits(doc), new LimitError(`FireDial holds at most ${LIMITS.views} views`))
+  fill(1, LIMITS.sparks)
   checkLimits(doc)
-  fill(LIMITS.groups, LIMITS.sparks + 1, false)
+  fill(1, LIMITS.sparks + 1)
   assert.throws(() => checkLimits(doc), new LimitError(`FireDial holds at most ${LIMITS.sparks} sparks`))
-  fill(1, LIMITS.sparksPerGroup, true)
-  checkLimits(doc)
-  fill(1, LIMITS.sparksPerGroup + 1, true)
-  assert.throws(() => checkLimits(doc), new LimitError(`A group holds at most ${LIMITS.sparksPerGroup} sparks`))
+})
+
+function name(text: string): LabelName {
+  const label = toLabelName(text)
+  assert.ok(label, text)
+  return label
+}
+
+const sparkWith = (id: number, ...labels: unknown[]): Spark => Spark.parse({ id, title: 's', url: 'https://a.example/', thumb: null, labels })
+
+test('a label keeps its case and spaces, tidied', () => {
+  assert.equal(toLabelName('  Trip   to Rome '), 'Trip to Rome')
+  assert.equal(toLabelName('#docs:api'), '#docs:api')
+})
+
+test('a label holds its limits exactly', () => {
+  assert.equal(labelProblem('x'.repeat(LIMITS.label)), null)
+  assert.match(labelProblem('x'.repeat(LIMITS.label + 1)) ?? '', /at most 400 characters/)
+  assert.equal(labelProblem('äöü'), null, 'characters, not bytes')
+  for (const text of ['', '   ']) assert.equal(labelProblem(text), 'A label needs a name', text)
+  assert.equal(labelProblem('a,b'), 'A label has no comma')
+})
+
+test('a spark keeps each valid label once whatever the case, at most 50', () => {
+  assert.deepEqual(sparkWith(0, 'docs', 'Docs', 'two words', '', 7, 'a,b').labels, ['docs', 'two words'])
+  const many = Array.from({ length: LIMITS.labelsPerSpark + 1 }, (_, index) => `label${index}`)
+  assert.equal(sparkWith(0, ...many).labels.length, LIMITS.labelsPerSpark)
+  assert.deepEqual(Spark.parse({ id: 0, title: 's', url: 'https://a.example/' }).labels, [], 'sparks from before labels')
+  assert.deepEqual(Spark.parse({ id: 0, title: 's', url: 'https://a.example/', labels: 'docs' }).labels, [])
+})
+
+test('adding and removing on a selection counts only the sparks that changed', () => {
+  const sparks = [sparkWith(0, 'docs'), sparkWith(1), sparkWith(2, 'docs api')]
+  assert.equal(addLabels(sparks, [name('Docs')]), 2)
+  assert.equal(addLabels(sparks, [name('docs')]), 0)
+  assert.equal(removeLabels(sparks, ['DOCS']), 3)
+  assert.deepEqual(
+    sparks.map((spark) => spark.labels),
+    [[], [], ['docs api']]
+  )
+  assert.equal(removeLabels(sparks, ['docs']), 0)
+})
+
+test('adding to a full spark changes no spark at all', () => {
+  const full = Array.from({ length: LIMITS.labelsPerSpark }, (_, index) => `label${index}`)
+  const sparks = [sparkWith(0), sparkWith(1, ...full)]
+  assert.throws(() => addLabels(sparks, [name('more')]), LimitError)
+  assert.deepEqual(sparks[0]?.labels, [])
+  assert.equal(addLabels(sparks, [name('label0')]), 1, 'one it has already fits')
+})
+
+test('label settings fall back to their defaults', () => {
+  assert.equal(normalizePrefs({}).showLabels, true)
+  assert.equal(normalizePrefs({}).showBuiltIn, true)
+  assert.equal(normalizePrefs({ showBuiltIn: false }).showBuiltIn, false)
+  assert.equal(normalizePrefs({ labelColor: 'colorful' }).labelColor, 'colorful')
+  assert.equal(normalizePrefs({ labelColor: 'rainbow' }).labelColor, DEFAULT_PREFS.labelColor)
+})
+
+test('All and Unlabeled get back their own rules; Unsorted from an older FireDial is Unlabeled', () => {
+  const doc = emptyDoc()
+  const word = toLabelName('x')
+  assert.ok(word)
+  for (const view of doc.views) view.rule = { all: false, include: [word], exclude: [word] }
+  canonicalize(doc)
+  assert.deepEqual(
+    doc.views.map((view) => view.rule),
+    [
+      { all: true, include: [], exclude: [] },
+      { all: false, include: [], exclude: [] }
+    ]
+  )
+  assert.equal(View.parse({ id: 3, kind: 'unsorted', title: 'Unsorted' }).kind, 'unlabeled')
+  assert.equal(View.parse({ id: 3, kind: 'odd', title: 'Odd' }).kind, 'normal')
+})
+
+test('local addresses get http, with the whole IP address', () => {
+  assert.equal(searchUrl('10.0.0.12:8080'), 'http://10.0.0.12:8080')
+  assert.equal(searchUrl('1.2.3.example'), 'https://1.2.3.example')
 })

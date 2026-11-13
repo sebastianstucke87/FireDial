@@ -81,6 +81,9 @@ const shortcuts: Record<string, () => Promise<void>> = {
     await press('/', `${base}/2`)
     await sparksAre(1)
     await press(Key.ESCAPE)
+    await until('the list closed', () => js("return document.querySelector('#suggest').hidden"))
+    await sparksAre(1) // the first Esc closes the list, the filtered sparks stay
+    await press(Key.ESCAPE)
     await sparksAre(SPARKS)
     await clickEdit()
     await (await tile(0)).click()

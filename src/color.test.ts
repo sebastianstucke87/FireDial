@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { contrast, honeycomb, mainColor, markOn, textOn } from './color.ts'
+import { contrast, honeycomb, mainColor, markOn, textOn, labelColor } from './color.ts'
 
 type Pixel = readonly [number, number, number, number]
 
@@ -136,4 +136,28 @@ test('the honeycomb goes around the center in hue, deeper outwards', () => {
     ['#10c64a', '#2fee2f', '#8fee2f', '#eeee2f', '#c68c10'],
     ['#10c610', '#4ac610', '#8cc610', '#c6c610']
   ])
+})
+
+test('a label keeps its pastel, labels differ, and none comes near the accent', () => {
+  const names = ['docs', 'docs:api', 'web', 'news', 'work', 'home', 'linux', 'music', 'maps', 'books', 'code', 'social']
+  for (const accent of ['#c2410c', '#be123c', '#1d4ed8', '#0f766e', '#3f3f46']) {
+    assert.equal(labelColor('docs', accent), labelColor('docs', accent))
+    const colors = names.map((name) => labelColor(name, accent))
+    assert.ok(new Set(colors).size === names.length, colors.join())
+    for (const color of colors) {
+      assert.match(color, /^#[0-9a-f]{6}$/)
+      assert.equal(textOn(color), '#000000', `${color} is light enough for dark text`)
+      assert.ok(contrast(color, accent) > 1.5 || accent === '#3f3f46', `${color} next to ${accent}`)
+    }
+  }
+})
+
+test('the hues spread out instead of bunching', () => {
+  const hues = ['docs', 'web', 'news', 'work', 'home', 'linux', 'music', 'maps', 'books', 'code', 'social', 'games'].map((name) => {
+    const color = labelColor(name, '#3f3f46')
+    const [r = 0, g = 0, b = 0] = [1, 3, 5].map((at) => Number.parseInt(color.slice(at, at + 2), 16))
+    return Math.round(Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b) * (180 / Math.PI) + 360) % 360
+  })
+  const sextants = new Set(hues.map((hue) => Math.floor(hue / 60)))
+  assert.ok(sextants.size >= 5, hues.join())
 })

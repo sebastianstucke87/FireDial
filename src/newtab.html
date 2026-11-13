@@ -17,6 +17,8 @@
     <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
     <symbol id="i-undo" viewBox="-1 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
     <symbol id="i-redo" viewBox="1 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+    <symbol id="i-funnel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
     <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
     <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></symbol>
@@ -32,17 +34,18 @@
     <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="12" x2="14" y2="12"/></symbol>
     <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
   </svg>
 
   <div class="App" id="app">
-    <aside class="Rail" aria-label="Groups">
+    <aside class="Rail" aria-label="Views">
       <div class="RailHead">
         <div class="Logo"><svg><use href="#i-flame"/></svg>FireDial</div>
       </div>
-      <nav class="Groups" id="groups"></nav>
-      <button type="button" class="NewGroup Skeleton" id="newGroup" data-action="new-group" aria-label="New group"><svg class="icon"><use href="#i-plus"/></svg></button>
-      <div class="Rail__resize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Group sidebar width" aria-valuemin="180" aria-valuemax="400" tabindex="0" title="Drag to resize, double-click for the default"></div>
+      <nav class="Groups" id="groups" aria-label="View list"></nav>
+      <button type="button" class="NewGroup Skeleton" id="newGroup" data-action="new-group" aria-label="New view"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <div class="Rail__resize" id="railResize" role="separator" aria-orientation="vertical" aria-label="View sidebar width" aria-valuemin="180" aria-valuemax="400" tabindex="0" title="Drag to resize, double-click for the default"></div>
     </aside>
 
     <section class="Content">
@@ -56,11 +59,16 @@
           <div class="Suggest" id="suggest" role="listbox" hidden></div>
         </div>
         <div class="GroupPick" id="groupPick"></div>
+        <div class="ViewSort" id="viewSort"></div>
       </div>
       <div class="BootError" id="bootError" role="alert" hidden>FireDial couldn't load your data. <button type="button" class="Button" data-action="reload">Reload</button></div>
       <main class="Main" id="main"><div class="Sparks" id="sparks"></div></main>
       <div class="Bars">
-        <button type="button" class="Trash Skeleton" id="trash" data-action="trash" hidden><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
+        <div class="BarStart">
+          <button type="button" class="Trash Skeleton" id="trash" data-action="trash" hidden><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
+          <button type="button" class="Button LabelBulk" id="labelBulk" data-action="label-bulk" hidden><svg class="icon"><use href="#i-tag"/></svg><span>Labels</span></button>
+          <button type="button" class="Button LabelBulk" id="removeFromView" data-action="remove-from-view" hidden><svg class="icon"><use href="#i-x"/></svg><span>Remove</span></button>
+        </div>
         <div class="Segmented History" id="history" hidden>
           <button type="button" id="undo" data-action="undo" disabled><svg class="icon"><use href="#i-undo"/></svg>Undo</button>
           <button type="button" id="redo" data-action="redo" disabled><svg class="icon"><use href="#i-redo"/></svg>Redo</button>
@@ -98,7 +106,7 @@
           </div>
         </section>
         <section class="Section">
-          <h3 class="Section__head"><svg class="icon"><use href="#i-sidebar"/></svg>Groups</h3>
+          <h3 class="Section__head"><svg class="icon"><use href="#i-sidebar"/></svg>Views</h3>
           <div class="Setting">
             <label>Counts</label>
             <div class="Segmented" data-setting="counts"><button type="button" data-value="on">Show</button><button type="button" data-value="off">Hide</button></div>
@@ -124,6 +132,21 @@
           </div>
         </section>
         <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-tag"/></svg>Labels</h3>
+          <div class="Setting">
+            <label>Chips</label>
+            <div class="Segmented" data-setting="labels"><button type="button" data-value="on">Show</button><button type="button" data-value="off">Hide</button></div>
+          </div>
+          <div class="Setting">
+            <label>All and Unlabeled</label>
+            <div class="Segmented" data-setting="builtIn"><button type="button" data-value="on">Show</button><button type="button" data-value="off">Hide</button></div>
+          </div>
+          <div class="Setting">
+            <label>Colors</label>
+            <div class="Segmented" data-setting="labelColor"><button type="button" data-value="monochrome">Mono</button><button type="button" data-value="solid">Solid</button><button type="button" data-value="colorful">Colorful</button></div>
+          </div>
+        </section>
+        <section class="Section">
           <h3 class="Section__head"><svg class="icon"><use href="#i-archive"/></svg>Backup</h3>
           <div class="Setting">
             <div class="Buttons">
@@ -145,7 +168,7 @@
 
   <div class="ContextMenu" role="menu" hidden></div>
 
-  <dialog class="Modal" id="sparkModal">
+  <dialog class="Modal Modal--steady" id="sparkModal">
     <form method="dialog" novalidate>
       <div class="Sections">
         <section class="Section">
@@ -160,16 +183,17 @@
           </div>
         </section>
         <section class="Section">
-          <h3 class="Section__head"><svg class="icon"><use href="#i-sidebar"/></svg>Group</h3>
-          <div class="Setting">
-            <div id="sparkGroup"></div>
-          </div>
-        </section>
-        <section class="Section">
           <h3 class="Section__head"><svg class="icon"><use href="#i-grid"/></svg>Spark</h3>
           <div class="Setting">
             <label class="Field"><span class="Input"><input type="text" name="title" aria-label="Title" autocomplete="off" maxlength="400"></span></label>
             <label class="Field"><span class="Input"><input type="text" name="url" aria-label="URL" placeholder="URL" autocomplete="off" spellcheck="false" maxlength="4000"></span></label>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-tag"/></svg>Labels</h3>
+          <div class="Setting">
+            <div id="sparkLabels"></div>
+            <p class="Field__error" id="sparkLabelError" hidden></p>
           </div>
         </section>
       </div>
@@ -191,7 +215,7 @@
             <dl class="Keys">
               <dt><kbd>/</kbd></dt><dd>Search</dd>
               <dt><kbd>Enter</kbd></dt><dd>Open the spark or suggestion</dd>
-              <dt><kbd>Esc</kbd></dt><dd>Clear selection or search, leave Edit</dd>
+              <dt><kbd>Esc</kbd></dt><dd>Close suggestions, clear search or selection, leave Edit</dd>
               <dt><kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&rarr;</kbd> <kbd>&darr;</kbd></dt><dd>Move between sparks</dd>
               <dt><kbd>Ctrl</kbd> + click</dt><dd>Open in a new tab</dd>
               <dt>Mouse middle click</dt><dd>Open in a new tab</dd>
@@ -211,6 +235,14 @@
           </div>
         </section>
         <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-archive"/></svg>Import</h3>
+          <div class="Setting">
+            <div class="Buttons">
+              <button type="button" class="Button" data-action="import-bookmarks"><svg class="icon"><use href="#i-globe"/></svg>Firefox bookmarks</button>
+            </div>
+          </div>
+        </section>
+        <section class="Section">
           <h3 class="Section__head"><svg class="icon"><use href="#i-undo"/></svg>Resets</h3>
           <div class="Setting">
             <div class="Buttons">
@@ -223,6 +255,63 @@
       </div>
       <hr class="Divider">
       <p class="Modal__note Modal__foot"><span id="aboutVersion"></span><a href="https://github.com/sebastianstucke87/FireDial" target="_blank" rel="noopener">github.com/sebastianstucke87/FireDial</a><a href="LICENSES.txt" target="_blank" rel="noopener">Licenses</a></p>
+    </form>
+  </dialog>
+
+  <dialog class="Modal Modal--steady" id="labelModal">
+    <form method="dialog" novalidate>
+      <p class="Modal__note" id="labelModalText"></p>
+      <div id="bulkLabels"></div>
+      <div class="Modal__actions">
+        <button type="button" class="Button" data-close>Cancel</button>
+        <span class="Spacer"></span>
+        <button type="submit" class="Button Button--primary" value="add">Add</button>
+        <button type="submit" class="Button" value="remove">Remove</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="Modal Modal--steady" id="ruleModal">
+    <form method="dialog" novalidate>
+      <div class="Sections">
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-grid"/></svg>Start with</h3>
+          <div class="Setting">
+            <div class="Segmented" id="ruleAll"><button type="button" data-value="on">All sparks</button><button type="button" data-value="off">No sparks</button></div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon" id="ruleIncludeIcon"><use href="#i-plus"/></svg><span id="ruleIncludeHead">Include</span></h3>
+          <div class="Setting">
+            <p class="Modal__note" id="ruleIncludeNote"></p>
+            <div id="ruleInclude"></div>
+          </div>
+        </section>
+        <section class="Section">
+          <h3 class="Section__head"><svg class="icon"><use href="#i-minus"/></svg>Exclude</h3>
+          <div class="Setting">
+            <p class="Modal__note">Takes out sparks with any of these labels.</p>
+            <div id="ruleExclude"></div>
+          </div>
+        </section>
+      </div>
+      <div class="Modal__actions">
+        <button type="button" class="Button" data-close>Cancel</button>
+        <span class="Spacer"></span>
+        <button type="submit" class="Button Button--primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="Modal" id="deleteViewModal">
+    <form method="dialog" novalidate>
+      <p class="Modal__text" id="deleteViewText"></p>
+      <div class="Modal__actions">
+        <button type="button" class="Button" data-close>Cancel</button>
+        <span class="Spacer"></span>
+        <button type="submit" class="Button" value="view">Delete view</button>
+        <button type="submit" class="Button Button--warn" value="sparks"><svg class="icon"><use href="#i-alert"/></svg>View and sparks</button>
+      </div>
     </form>
   </dialog>
 

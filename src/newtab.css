@@ -99,8 +99,11 @@
   --accent: var(--custom);
 }
 
+/* every scrollbar the same: thin, a muted thumb, no track */
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 28%, transparent) transparent;
 }
 
 [hidden] {
@@ -253,7 +256,6 @@ html:has(.App--options) {
   overflow: auto;
   margin: 0 -4px;
   padding: 2px 4px;
-  scrollbar-width: thin;
 }
 
 .Group {
@@ -439,7 +441,7 @@ input::placeholder {
 /* the bar in the middle of the space above --first-row; below it, .Main's padding comes on top */
 .Top {
   display: grid;
-  grid-template-columns: minmax(0, 600px);
+  grid-template-columns: 1fr minmax(0, 600px) 1fr;
   justify-content: center;
   align-items: center;
   gap: 16px;
@@ -448,6 +450,26 @@ input::placeholder {
 
 .GroupPick {
   display: none;
+}
+
+/* the open view's sort, in Edit only: as tall as the search, beside it, which stays in the middle */
+.ViewSort {
+  visibility: hidden;
+  justify-self: start;
+  width: 170px;
+}
+
+.editing .ViewSort {
+  visibility: visible;
+}
+
+.ViewSort .Dropdown__button {
+  height: 48px;
+  border-radius: 24px;
+}
+
+.ViewSort.Dropdown--open .Dropdown__button {
+  border-radius: 24px 24px 0 0;
 }
 
 .Main {
@@ -536,6 +558,7 @@ input::placeholder {
   --round: 24px;
 
   position: relative;
+  grid-column: 2;
   width: 100%;
 }
 
@@ -725,18 +748,13 @@ input::placeholder {
   text-overflow: ellipsis;
 }
 
-.Host,
-.In {
+.Host {
   display: none;
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.In {
-  display: block;
 }
 
 /* the "add" skeletons: new spark and new group look the same */
@@ -817,8 +835,7 @@ input::placeholder {
   transform: none;
 }
 
-.Spark--selected .Host,
-.Spark--selected .In {
+.Spark--selected .Host {
   color: var(--text);
 }
 
@@ -985,7 +1002,11 @@ body.editing .Sparks .Spark {
   padding: 4px 10px 4px 4px;
 }
 
-[data-titles='off'] .Sparks .Text {
+/* titles off: the chips stay, if shown; with nothing left, the text box goes too */
+[data-titles='off'] .Sparks .Title,
+[data-titles='off'] .Sparks .Host,
+[data-titles='off'] .Sparks .Text:not(:has(.Chips)),
+[data-titles='off'][data-labels='off'] .Sparks .Text {
   display: none;
 }
 
@@ -993,7 +1014,8 @@ body.editing .Sparks .Spark {
   display: none;
 }
 
-[data-titles='off'][data-layout='wide'] .Sparks .Thumb {
+[data-titles='off'][data-layout='wide'] .Sparks .Spark:not(:has(.Chips)) .Thumb,
+[data-titles='off'][data-labels='off'][data-layout='wide'] .Sparks .Thumb {
   width: 100%;
 }
 
@@ -1536,7 +1558,29 @@ body.editing .Sparks .Spark {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  max-height: calc(100vh - 34px); /* the dialog's, less its border */
   padding: 24px;
+}
+
+/* between the head and the buttons: the only part that scrolls, edge to edge, with room for focus rings */
+.Modal__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  margin: -4px -24px;
+  padding: 4px 24px;
+  overflow: auto;
+}
+
+/* dialogs with label fields keep one height while their lists open and close */
+.Modal--steady form {
+  height: min(var(--steady, 680px), calc(100vh - 34px));
+}
+
+#labelModal {
+  --steady: 480px;
 }
 
 .Modal__head {
@@ -1826,7 +1870,6 @@ kbd {
   z-index: 31;
   overflow: auto;
   border-radius: 0 0 22px 22px;
-  scrollbar-width: thin;
 }
 
 .Dropdown__option {
@@ -1931,6 +1974,10 @@ kbd {
     padding: 10px 12px;
   }
 
+  .Top .SearchWrap {
+    grid-column: auto;
+  }
+
   .SearchWrap {
     --round: 22px;
   }
@@ -1943,7 +1990,158 @@ kbd {
     display: block;
   }
 
+  .ViewSort {
+    display: none;
+  }
+
   .Main {
     padding-inline: 12px;
   }
+}
+
+/* ---------- labels ---------- */
+
+/* a chip's colors: grey, the accent, or the label's own color */
+.Chip,
+.Dot {
+  --chip-bg: var(--surface-2);
+  --chip-text: var(--muted);
+}
+
+[data-label-color='solid'] .Chip,
+[data-label-color='solid'] .Dot {
+  --chip-bg: var(--accent);
+  --chip-text: var(--on-accent);
+}
+
+[data-label-color='colorful'] .Chip,
+[data-label-color='colorful'] .Dot {
+  --chip-bg: var(--chip, var(--surface-2));
+  --chip-text: var(--on-chip, var(--text));
+}
+
+.Dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 15%, transparent);
+}
+
+.Chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-height: 44px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.Chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+[data-labels='off'] .Sparks .Chips {
+  display: none;
+}
+
+[data-layout='wide'] .Sparks .Chips,
+[data-layout='list'] .Sparks .Chips {
+  justify-content: flex-start;
+}
+
+/* the chips in the edit dialog: always shown, with a button to remove each */
+.Modal .Chips {
+  justify-content: flex-start;
+  max-height: none;
+  margin: 0 0 8px;
+}
+
+.Modal .Chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 9px;
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.Chip__remove {
+  display: flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.Chip__remove .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.Chip__remove:hover {
+  background: color-mix(in srgb, currentcolor 20%, transparent);
+}
+
+.Field__error {
+  margin: 6px 0 0;
+  color: #dc2626;
+  font-size: 12.5px;
+}
+
+/* Delete and Labels side by side on the left of the bars */
+.BarStart {
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.LabelBulk {
+  height: 40px;
+  pointer-events: auto;
+}
+
+/* a field of label chips: the chips and the text wrap inside one box, the list hangs below it like the search's */
+.ChipField__box {
+  flex-wrap: wrap;
+  gap: 4px;
+  height: auto;
+  min-height: 42px;
+  padding: 4px 6px;
+  cursor: text;
+}
+
+.ChipField__box input {
+  flex: 1 1 120px;
+  height: 32px;
+  padding: 0 6px;
+}
+
+.ChipField__list {
+  position: static; /* in the flow, all of it: the dialog scrolls, never the list inside it */
+  border-width: 1px;
+  border-radius: 0 0 12px 12px;
+  box-shadow: none;
+}
+
+.ChipField:has(.ChipField__list:not([hidden])) .ChipField__box {
+  border-bottom-color: transparent;
+  border-radius: 12px 12px 0 0;
+  box-shadow: none;
 }

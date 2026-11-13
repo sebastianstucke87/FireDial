@@ -59,6 +59,8 @@ async function inNotification(selector: string): Promise<WebElement> {
 
 const notification = async (): Promise<string> => (await inNotification('span')).getText()
 
+const noNotification = (): Promise<boolean> => js("return document.querySelector('#firedial-toasts') === null")
+
 async function notifications(): Promise<string[]> {
   await until('a notification', () => js("return document.querySelector('#firedial-toasts') !== null"))
   const hosts = await driver.findElements(By.css('#firedial-toasts > *'))
@@ -77,18 +79,24 @@ async function addSpark(path: string): Promise<void> {
   await until('the spark', async () => (await sparkCount()) === before + 1)
 }
 
-async function addGroup(name: string): Promise<void> {
+async function addView(name: string): Promise<void> {
   await click('#newGroup')
   await press(name, Key.ENTER)
-  await until('the group', async () => (await text('.Group--active .Name')) === name)
+  await until('the view', async () => (await text('.Group--active .Name')) === name)
+}
+
+// The question a view's delete asks: the view only, or its sparks too.
+async function answerDelete(choice: 'view' | 'sparks'): Promise<void> {
+  await until('the question', async () => (await openDialogs()).some((label) => label.startsWith('Delete ')))
+  await click(`#deleteViewModal [value="${choice}"]`)
 }
 
 const edit = (): Promise<void> => click('#editToggle')
 
-const groupNames = (): Promise<string[]> => js("return [...document.querySelectorAll('.Group .NameInput')].map((input) => input.value)")
+const viewNames = (): Promise<string[]> => js("return [...document.querySelectorAll('.Group .NameInput')].map((input) => input.value)")
 const marked = (): Promise<number> => js("return document.querySelectorAll('.Group--marked').length")
 
-// A real mouse box from one group row to another; from a little to the side, off the active row's name.
+// A real mouse box from one view row to another; from a little to the side, off the active row's name.
 async function sweep(from: number, to = from): Promise<void> {
   const points = await js<number[]>(
     `
@@ -165,14 +173,20 @@ after(async () => {
   rmSync(folder, { recursive: true, force: true })
 })
 
-test('all four modals are built the same', async () => {
+test('all seven modals are built the same', async () => {
   await home()
   const heads = await js<string[]>(`
     return [...document.querySelectorAll('dialog')].map((dialog) => {
       const flame = dialog.querySelector('.Modal__head .Modal__title use')?.getAttribute('href')
       return [dialog.className, flame, dialog.querySelectorAll('.Modal__head').length].join()
     })`)
-  assert.deepEqual(heads, ['Modal,#i-flame,1', 'Modal Modal--hero,#i-flame,1', 'Modal,#i-flame,1', 'Modal,#i-flame,1'])
+  assert.deepEqual(heads, [
+    'Modal Modal--steady,#i-flame,1',
+    'Modal Modal--hero,#i-flame,1',
+    'Modal Modal--steady,#i-flame,1',
+    'Modal Modal--steady,#i-flame,1',
+    ...Array.from({ length: 3 }, () => 'Modal,#i-flame,1')
+  ])
   await edit()
   await about()
   const about_ = await js<number>("return document.querySelector('#aboutModal').getBoundingClientRect().width")
@@ -187,13 +201,13 @@ test('the sidebar is called Settings, with an icon and a title per section', asy
   await home()
   await edit()
   const labels = await js<string[]>("return [...document.querySelectorAll('.Options .Setting > label')].map((label) => label.textContent)")
-  assert.deepEqual(labels, ['Counts', 'Titles', 'Layout', 'Columns', 'Spacing'])
+  assert.deepEqual(labels, ['Counts', 'Titles', 'Layout', 'Columns', 'Spacing', 'Chips', 'All and Unlabeled', 'Colors'])
   assert.equal(await text('.Options h2'), 'Settings')
   assert.deepEqual(
     await js(
       "return [...document.querySelectorAll('.Options .Section__head')].map((head) => `${head.textContent} ${head.querySelector('use').getAttribute('href')}`)"
     ),
-    ['Color #i-droplet', 'Groups #i-sidebar', 'Sparks #i-grid', 'Backup #i-archive']
+    ['Color #i-droplet', 'Views #i-sidebar', 'Sparks #i-grid', 'Labels #i-tag', 'Backup #i-archive']
   )
   assert.equal(await js("return document.querySelector('#editToggle use').getAttribute('href')"), '#i-edit')
   assert.equal(await js("return document.querySelector('.Options').getBoundingClientRect().width"), 360)
@@ -245,6 +259,17 @@ test('the search bar stays clear of the Edit button in a narrow window', async (
   assert.ok(gap > 0, `${gap}`)
 })
 
+test('in the slim layout, the search box fills its place, so its suggestions line up with it', async () => {
+  await home()
+  await driver.manage().window().setRect({ width: 640, height: 600 })
+  await until('the slim page', () => js("return getComputedStyle(document.querySelector('#groupPick')).display !== 'none'"))
+  const edges = await js<string[]>(
+    "return ['.SearchWrap', '.Search'].map((selector) => { const { left, right, top } = document.querySelector(selector).getBoundingClientRect(); return [left, right, top].join() })"
+  )
+  await driver.manage().window().setRect({ width: 1400, height: 900 })
+  assert.equal(edges[0], edges[1])
+})
+
 test('the page is set in Onest, from the extension', async () => {
   await home()
   await until('the font', () => js("return [...document.fonts].some((face) => face.family === 'Onest' && face.status === 'loaded')"))
@@ -284,7 +309,7 @@ test('the spark modal has sections like the sidebar, and says Add for a new spar
     await js(
       "return [...document.querySelectorAll('#sparkModal .Section__head')].map((head) => `${head.textContent} ${head.querySelector('use').getAttribute('href')}`)"
     ),
-    ['Preview #i-image', 'Group #i-sidebar', 'Spark #i-grid']
+    ['Preview #i-image', 'Spark #i-grid', 'Labels #i-tag']
   )
   assert.deepEqual(
     await js(
@@ -294,22 +319,21 @@ test('the spark modal has sections like the sidebar, and says Add for a new spar
   )
   assert.equal(await text('[data-action="clear-thumb"]'), 'Clear')
   const edges = await js<string[]>(`
-    return ['.Drop', '[data-action="upload"]', '.Field .Input', '#sparkGroup'].map((selector) => {
+    return ['.Drop', '[data-action="upload"]', '.Field .Input'].map((selector) => {
       const { left, right } = document.querySelector('#sparkModal ' + selector).getBoundingClientRect()
       return selector === '[data-action="upload"]' ? left : [left, right].join()
     })`)
   assert.equal(edges[0], edges[2])
-  assert.equal(edges[0], edges[3])
   assert.equal(String(edges[0]).split(',')[0], String(edges[1]))
   await press(Key.ESCAPE)
   await edit()
   await js("document.querySelector('#sparks .EditSpark').click()")
   await until('Edit', async () => (await openDialogs()).join() === 'Edit')
   assert.deepEqual(await buttons(), ['Cancel', 'Save'])
-  const apart = await js<number>(`
-    const [above, actions] = ['#sparkModal .Sections', '#sparkModal .Modal__actions'].map((selector) => document.querySelector(selector).getBoundingClientRect())
-    return Math.round(actions.top - above.bottom)`)
-  assert.equal(apart, 36)
+  const apart = await js<number[]>(`
+    const [above, actions, dialog] = ['#sparkModal .Modal__body', '#sparkModal .Modal__actions', '#sparkModal'].map((selector) => document.querySelector(selector).getBoundingClientRect())
+    return [actions.top - above.bottom, dialog.bottom - actions.bottom].map(Math.round)`)
+  assert.deepEqual(apart, [32, 25], 'the buttons apart from what scrolls, and in sight at the bottom')
   await press(Key.ESCAPE)
   await edit()
 })
@@ -388,14 +412,14 @@ test('About ends with the version, the address and the licenses, and warns in th
   const warnings = await js<string[]>(
     "return [...document.querySelectorAll('.Button--warn')].map((button) => `${button.textContent} ${button.querySelector('use').getAttribute('href')}`)"
   )
-  assert.deepEqual(warnings, ['Import #i-alert', 'Delete all #i-alert', 'Start over #i-alert'])
+  assert.deepEqual(warnings, ['Import #i-alert', 'Delete all #i-alert', 'Start over #i-alert', 'View and sparks #i-alert'])
   assert.ok(
     await js("return [...document.querySelectorAll('#aboutModal .Button--warn')].every((button) => button.getBoundingClientRect().height === 40)"),
     'each label on one line'
   )
   assert.deepEqual(
     await js(
-      "return [...new Set([...document.querySelectorAll('#aboutModal .Buttons .Button')].flatMap((button) => { const box = button.getBoundingClientRect(); return [`top ${Math.round(box.top)}`, `width ${Math.round(box.width)}`] }))].length"
+      "return [...new Set([...document.querySelectorAll('#aboutModal .Buttons:has([data-action=ask-start-over]) .Button')].flatMap((button) => { const box = button.getBoundingClientRect(); return [`top ${Math.round(box.top)}`, `width ${Math.round(box.width)}`] }))].length"
     ),
     2,
     'the resets in one row, all as wide'
@@ -417,7 +441,7 @@ test('About ends with the version, the address and the licenses, and warns in th
     await js(
       "return [...document.querySelectorAll('#aboutModal .Section__head')].map((head) => `${head.textContent} ${head.querySelector('use').getAttribute('href')}`)"
     ),
-    ['Hotkeys #i-keyboard', 'Hotkeys in Edit #i-edit', 'Resets #i-undo']
+    ['Hotkeys #i-keyboard', 'Hotkeys in Edit #i-edit', 'Import #i-archive', 'Resets #i-undo']
   )
   assert.ok(await js("return document.querySelector('#aboutModal .Divider').nextElementSibling.matches('.Modal__foot')"))
   await press(Key.ESCAPE)
@@ -443,14 +467,14 @@ test("Esc closes a modal and nothing else, and the page's menu has no Edit", asy
     .contextClick(driver.findElement(By.id('main')))
     .perform()
   const entries = (): Promise<string[]> => js("return [...document.querySelectorAll('.ContextMenu__item')].map((item) => item.textContent)")
-  assert.deepEqual(await entries(), ['New spark', 'New group', 'Done'])
+  assert.deepEqual(await entries(), ['New spark', 'New view', 'Done'])
   await js("[...document.querySelectorAll('.ContextMenu__item')].find((item) => item.textContent === 'Done').click()")
   assert.ok(await js("return !document.body.classList.contains('editing')"), 'Done leaves Edit')
   await driver
     .actions()
     .contextClick(driver.findElement(By.id('main')))
     .perform()
-  assert.deepEqual(await entries(), ['New spark', 'New group', 'Edit'])
+  assert.deepEqual(await entries(), ['New spark', 'New view', 'Edit'])
   await js("[...document.querySelectorAll('.ContextMenu__item')].find((item) => item.textContent === 'Edit').click()")
   assert.ok(await js("return document.body.classList.contains('editing')"), 'Edit opens Edit')
   await edit()
@@ -478,30 +502,26 @@ test('Esc takes back what was typed in place', async () => {
   await until('the plus again', () => js("return document.querySelector('.AddSpark input') === null"))
   assert.equal(await sparkCount(), 2)
   await click('#newGroup')
-  assert.equal(await js("return document.querySelector('.NewGroupInput').placeholder"), 'Name group')
+  assert.equal(await js("return document.querySelector('.NewGroupInput').placeholder"), 'Name view')
   await press('Nothing', Key.ESCAPE)
   await until('the button again', () => js("return document.querySelector('#newGroup') !== null"))
-  assert.equal(await js("return document.querySelectorAll('.Group').length"), 1)
+  assert.equal(await js("return document.querySelectorAll('.Group').length"), 2)
   await edit()
   await driver.findElement(By.css('.Group .NameInput')).click()
   await press('Renamed', Key.ESCAPE)
-  assert.equal(await js("return document.querySelector('.Group .NameInput').value"), 'Home')
-  assert.equal((await stored<{ title: string }[]>('groups'))[0]?.title, 'Home')
+  assert.equal(await js("return document.querySelector('.Group .NameInput').value"), 'All')
+  assert.equal((await stored<{ title: string }[]>('views'))[0]?.title, 'All')
 })
 
-test('Reset settings leaves the sparks and says so, without leading anywhere', async () => {
+test('Reset settings leaves the sparks, and needs no notification: it shows', async () => {
   await home()
   await edit()
   await click('[data-setting="color"] [data-value="ocean"]')
   await until('the color', () => js("return document.documentElement.dataset.color === 'ocean'"))
   await confirmFromAbout('ask-reset-settings')
-  assert.equal(await notification(), 'Settings reset')
-  assert.equal(await js('return document.documentElement.dataset.color'), 'firedial')
+  await until('the color back', () => js("return document.documentElement.dataset.color === 'firedial'"))
   assert.equal(await sparkCount(), 2)
-  const handles = await driver.getAllWindowHandles()
-  await (await inNotification('span')).click()
-  assert.equal((await driver.getAllWindowHandles()).length, handles.length)
-  await (await inNotification('button')).click()
+  assert.ok(await noNotification())
 })
 
 test('Export names the file and says where it went', async () => {
@@ -521,34 +541,33 @@ test('Export names the file and says where it went', async () => {
   assert.ok(typeof backup === 'object' && backup !== null && 'sparks' in backup && Array.isArray(backup.sparks) && backup.sparks.length === 2)
 })
 
-test('a move out of view gets a notification, from the Edit modal and by dragging', async () => {
+test('a drop on a view adds the sparks there too, and says so', async () => {
   await home()
-  await addGroup('Elsewhere')
+  await addView('Elsewhere')
   await js("document.querySelector('.Group').click()")
   await until('two sparks', async () => (await sparkCount()) === 2)
   await edit()
-  await js("document.querySelector('#sparks .EditSpark').click()")
-  await until('Edit', async () => (await openDialogs()).join() === 'Edit')
-  await click('#sparkGroup .Dropdown__button')
-  assert.equal(await text('#sparkGroup [aria-selected="true"]'), 'Home')
-  await click('#sparkGroup .Dropdown__option:nth-child(2)')
-  await click('#sparkModal .Button--primary')
-  assert.equal(await notification(), 'Moved to Elsewhere')
-  await until('one spark', async () => (await sparkCount()) === 1)
   await js(`
     const dataTransfer = new DataTransfer()
-    const [tile, group] = [document.querySelector('#sparks .Spark[data-id]'), document.querySelectorAll('.Group')[1]]
+    const [tile, view] = [document.querySelector('#sparks .Spark[data-id]'), document.querySelectorAll('.Group')[2]]
     tile.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
-    group.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
-    group.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))`)
-  await until('the move', async () => (await sparkCount()) === 0)
-  assert.equal(await notification(), 'Moved 1 spark to Elsewhere')
+    view.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
+    view.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))`)
+  assert.equal(await notification(), 'Added 1 spark to Elsewhere')
+  assert.equal(await sparkCount(), 2, 'still in All')
+  await js("document.querySelectorAll('.Group')[2].click()")
+  await until('one spark in Elsewhere', async () => (await sparkCount()) === 1)
+  await js("document.querySelector('#sparks .EditSpark').click()")
+  await until('Edit', async () => (await openDialogs()).join() === 'Edit')
+  assert.deepEqual(await js("return [...document.querySelectorAll('#sparkLabels .Chip')].map((chip) => chip.textContent)"), ['Elsewhere'])
+  await press(Key.ESCAPE)
+  await edit()
 })
 
 test('what the context menu does out of sight gets a notification', async () => {
   await home()
-  await js("document.querySelectorAll('.Group')[1].click()")
-  await until('two sparks', async () => (await sparkCount()) === 2)
+  await js("document.querySelectorAll('.Group')[2].click()")
+  await until('one spark', async () => (await sparkCount()) === 1)
   const menu = async (selector: string, label: string): Promise<void> => {
     await driver
       .actions()
@@ -558,9 +577,9 @@ test('what the context menu does out of sight gets a notification', async () => 
   }
   await menu('#sparks .Spark[data-id]', 'Copy URL')
   assert.equal(await notification(), 'URL copied')
-  await menu('.Group:nth-child(2)', 'Open all')
-  await until('the tabs', async () => (await driver.getAllWindowHandles()).length === 3)
-  assert.equal(await notification(), 'Opened 2 tabs')
+  await menu('.Group:nth-child(3)', 'Open all')
+  await until('the tab', async () => (await driver.getAllWindowHandles()).length === 2)
+  assert.equal(await notification(), 'Opened 1 tab')
   const [current, ...opened] = await driver.getAllWindowHandles()
   assert.ok(current)
   for (const handle of opened) {
@@ -568,13 +587,13 @@ test('what the context menu does out of sight gets a notification', async () => 
     await driver.close()
   }
   await driver.switchTo().window(current)
-  await js("document.querySelector('.Group').click()")
-  await until('the empty group', async () => (await sparkCount()) === 0)
-  await menu('.Group:nth-child(1)', 'Delete')
-  await until('the group to go', () => js("return document.querySelectorAll('.Group').length === 1"))
+  await menu('.Group:nth-child(3)', 'Delete')
+  await answerDelete('view')
+  await until('the view to go', () => js("return document.querySelectorAll('.Group').length === 2"))
+  assert.equal(await sparkCount(), 2, 'its spark stays')
 })
 
-test("the last group can't be removed, only renamed", async () => {
+test("All and Unlabeled can't be deleted, only renamed", async () => {
   await home()
   await driver
     .actions()
@@ -655,20 +674,20 @@ test('Import saves a backup first, stays in the selected color, sums up and leav
   await importFile({
     format: 'firedial',
     prefs: { color: 'teal' },
-    groups: [
-      { id: 0, title: 'A' },
-      { id: 1, title: 'B' }
+    views: [
+      { kind: 'normal', title: 'A', order: [0] },
+      { kind: 'normal', title: 'B', sort: 'manual', order: [2, 1] }
     ],
     sparks: [
-      { groupId: 0, title: 'a', url: `${base}/a` },
-      { groupId: 1, title: 'b', url: `${base}/b` },
-      { groupId: 1, title: 'c', url: `${base}/c` }
+      { id: 0, title: 'a', url: `${base}/a`, labels: ['A'] },
+      { id: 1, title: 'b', url: `${base}/b`, labels: ['B'] },
+      { id: 2, title: 'c', url: `${base}/c`, labels: ['B'] }
     ]
   })
   const file = saved().find((name) => !before.includes(name))
   assert.match(file ?? '', /^firedial_\d{4}-\d{2}-\d{2}_\d{6}_autobackup\.json$/)
   assert.deepEqual(await openDialogs(), ['Import complete'])
-  assert.equal(await text('#importDetail'), 'Imported 2 groups with 3 sparks')
+  assert.equal(await text('#importDetail'), 'Imported 2 views with 3 sparks')
   assert.equal(await text('#importDone'), 'Done')
   const colors = await js<string[]>(`
     const modal = document.querySelector('#importModal')
@@ -676,15 +695,21 @@ test('Import saves a backup first, stays in the selected color, sums up and leav
   assert.deepEqual(colors, [OCEAN, OCEAN])
   await click('#importDone')
   await until('the imported color', () => js("return document.documentElement.dataset.color === 'teal'"))
-  await until('the sparks', async () => (await sparkCount()) === 1)
+  await until('the sparks', async () => (await sparkCount()) === 3)
   assert.equal(await canUndo(), false)
+  await js("document.querySelectorAll('.Group')[3].click()")
+  await until(
+    'B in its own order',
+    async () =>
+      (await js<string[]>("return [...document.querySelectorAll('#sparks .Spark[data-id] .Title')].map((title) => title.textContent)")).join() === 'c,b'
+  )
 })
 
 test('a file without sparks changes nothing, and a broken one says so', async () => {
   await home()
   await edit()
   const before = saved()
-  await importFile({ format: 'firedial', groups: [{ id: 0, title: 'Empty' }], sparks: [] })
+  await importFile({ format: 'firedial', views: [{ kind: 'normal', title: 'Empty' }], sparks: [] })
   assert.deepEqual(await openDialogs(), ['Import failed'])
   assert.match(await text('#importDetail'), /no sparks/)
   assert.equal(await text('#importDone'), 'Close')
@@ -699,7 +724,8 @@ test('Delete everything saves a backup first, then takes the bookmarks along', a
   await edit()
   const before = saved()
   await confirmFromAbout('ask-delete-everything')
-  assert.deepEqual(await notifications(), ['Backup saved', 'Everything deleted'])
+  await until('everything gone', async () => (await stored<unknown[]>('sparks')).length === 0)
+  assert.deepEqual(await notifications(), ['Backup saved'])
   const file = saved().find((name) => !before.includes(name))
   assert.match(file ?? '', /_autobackup(\(\d+\))?\.json$/) // (1): the same second as the last one
   const backup: unknown = JSON.parse(readFileSync(join(downloads, file ?? ''), 'utf8'))
@@ -708,16 +734,16 @@ test('Delete everything saves a backup first, then takes the bookmarks along', a
   const bookmarks = (): Promise<number> =>
     driver.executeAsyncScript(`
     const done = arguments[arguments.length - 1]
-    browser.bookmarks.search({ title: 'FireDial' }).then(async ([root]) => done(root ? (await browser.bookmarks.getSubTree(root.id))[0].children.flatMap((node) => node.children ?? [node]).filter((node) => node.url).length : 0))`)
+    browser.bookmarks.search({ title: 'FireDial' }).then(async ([root]) => done(root ? (await browser.bookmarks.getSubTree(root.id))[0].children.flatMap((node) => node.children ?? [node]).filter((node) => node.url && !node.url.startsWith('https://firedial.invalid/')).length : 0))`)
   await until('the bookmarks to go', async () => (await bookmarks()) === 0)
   await edit()
   assert.equal(await canUndo(), false)
   await edit()
 })
 
-test('Start over saves a backup, then brings back the sparks, groups and settings FireDial comes with', async () => {
+test('Start over saves a backup, then brings back the sparks, views and settings FireDial comes with', async () => {
   const defaults = z
-    .object({ groups: z.array(z.object({ title: z.string() })), sparks: z.array(z.object({ title: z.string() })) })
+    .object({ views: z.array(z.object({ title: z.string() })), sparks: z.array(z.object({ title: z.string() })) })
     .parse(JSON.parse(readFileSync('src/defaults.json', 'utf8')))
   await home()
   await edit()
@@ -725,11 +751,12 @@ test('Start over saves a backup, then brings back the sparks, groups and setting
   await until('the setting', () => js("return document.documentElement.dataset.counts === 'off'"))
   const before = saved().length
   await confirmFromAbout('ask-start-over')
-  assert.deepEqual(await notifications(), ['Backup saved', 'Started over'])
+  await until('the defaults', async () => (await stored<unknown[]>('sparks')).length === defaults.sparks.length)
+  assert.deepEqual(await notifications(), ['Backup saved'])
   await until('the backup', () => Promise.resolve(saved().length === before + 1))
   assert.deepEqual(
-    (await stored<{ title: string }[]>('groups')).map((group) => group.title),
-    defaults.groups.map((group) => group.title)
+    (await stored<{ title: string }[]>('views')).map((view) => view.title),
+    defaults.views.map((view) => view.title)
   )
   assert.equal((await stored<unknown[]>('sparks')).length, defaults.sparks.length)
   assert.equal((await stored<{ showCounts: boolean }>('prefs')).showCounts, true)
@@ -743,7 +770,7 @@ test('Start over saves a backup, then brings back the sparks, groups and setting
   const left = (): Promise<number> =>
     driver.executeAsyncScript(`
     const done = arguments[arguments.length - 1]
-    browser.bookmarks.search({ title: 'FireDial' }).then(async ([root]) => done(root ? (await browser.bookmarks.getSubTree(root.id))[0].children.flatMap((node) => node.children ?? [node]).filter((node) => node.url).length : 0))`)
+    browser.bookmarks.search({ title: 'FireDial' }).then(async ([root]) => done(root ? (await browser.bookmarks.getSubTree(root.id))[0].children.flatMap((node) => node.children ?? [node]).filter((node) => node.url && !node.url.startsWith('https://firedial.invalid/')).length : 0))`)
   await until('the bookmarks to go', async () => (await left()) === 0 && (await stored<unknown[]>('sparks')).length === 0) // still syncing the ones it brought back
   await edit()
 })
@@ -752,24 +779,25 @@ test('a fresh FireDial has nothing to back up, until something changed', async (
   await home()
   await edit()
   const before = saved()
-  await importFile({ format: 'firedial', groups: [{ id: 0, title: 'A' }], sparks: [{ groupId: 0, title: 'a', url: `${base}/a` }] })
+  await importFile({ format: 'firedial', views: [{ kind: 'normal', title: 'A' }], sparks: [{ id: 0, title: 'a', url: `${base}/a`, labels: ['A'] }] })
   assert.deepEqual(await openDialogs(), ['Import complete'])
   await click('#importDone')
   assert.deepEqual(saved(), before)
   await confirmFromAbout('ask-delete-everything')
-  assert.deepEqual(await notifications(), ['Backup saved', 'Everything deleted'])
+  assert.deepEqual(await notifications(), ['Backup saved'])
   await until('the backup', () => Promise.resolve(saved().length === before.length + 1))
   await home()
   await edit()
   await confirmFromAbout('ask-delete-everything')
-  assert.deepEqual(await notifications(), ['Everything deleted'])
+  await until('the question gone', async () => (await openDialogs()).length === 0)
+  assert.ok(await noNotification(), 'no backup')
   assert.equal(saved().length, before.length + 1)
   await home()
   await edit()
   await click('[data-setting="counts"] [data-value="off"]')
   await until('the setting', () => js("return document.documentElement.dataset.counts === 'off'"))
   await confirmFromAbout('ask-delete-everything')
-  assert.deepEqual(await notifications(), ['Backup saved', 'Everything deleted'])
+  assert.deepEqual(await notifications(), ['Backup saved'])
 })
 
 test('another open tab has nothing left to undo either', async () => {
@@ -816,20 +844,20 @@ test("Delete counts what's selected", async () => {
   await edit()
 })
 
-test('a box marks groups like sparks, and a click on a group still shows it', async () => {
+test('a box marks views like sparks, and a click on a view still shows it', async () => {
   await home()
-  await addGroup('Keep')
+  await addView('Keep')
   await addSpark('kept')
-  await addGroup('Gone')
+  await addView('Gone')
   await addSpark('gone')
   await addSpark('gone-too')
   await js("document.querySelector('.Group').click()")
   await edit()
   assert.equal(await js("return document.querySelectorAll('.GroupDelete').length"), 0)
-  const gone = (await groupNames()).indexOf('Gone')
+  const gone = (await viewNames()).indexOf('Gone')
   await sweep(gone)
   assert.equal(await marked(), 1)
-  assert.equal(await js("return document.querySelector('.Group--active .NameInput').value"), (await groupNames())[0])
+  assert.equal(await js("return document.querySelector('.Group--active .NameInput').value"), (await viewNames())[0])
   assert.equal(await text('#trash'), 'Delete 1')
   await click('#undo')
   assert.equal(await marked(), 0)
@@ -840,45 +868,46 @@ test('a box marks groups like sparks, and a click on a group still shows it', as
   assert.ok(await js("return document.body.classList.contains('editing')"))
   await sweep(gone)
   await js("document.querySelectorAll('.Group')[arguments[0]].click()", 1)
-  assert.equal(await marked(), 1, "showing a group keeps what's marked")
+  assert.equal(await marked(), 1, "showing a view keeps what's marked")
   await press(Key.ESCAPE)
   await js("document.querySelector('.Group').click()")
   await edit()
 })
 
-test('Del and the bar delete marked groups along with sparks, and one group stays', async () => {
+test('Del and the bar delete marked views after asking, and All and Unlabeled stay', async () => {
   await home()
   await js("document.querySelector('.Group').click()")
   await edit()
-  const all = await groupNames()
+  const all = await viewNames()
   const gone = all.indexOf('Gone')
+  const sparks = await sparkCount()
   await sweep(gone)
-  await js("document.querySelectorAll('.Group')[arguments[0]].click()", 1)
-  await until('the sparks', async () => (await sparkCount()) === 1)
   await js("document.querySelector('#sparks .Spark[data-id]').click()")
   assert.equal(await text('#trash'), 'Delete 2')
   await click('#trash')
-  await until('the group to go', async () => (await groupNames()).length === all.length - 1)
+  await answerDelete('view')
+  await until('the view to go', async () => (await viewNames()).length === all.length - 1)
+  await until('the spark to go', async () => (await sparkCount()) === sparks - 1)
   await click('#undo')
-  await until('the group to return', async () => (await groupNames()).length === all.length)
+  await until('the view to return', async () => (await viewNames()).length === all.length)
   await until('the marks to clear', async () => (await marked()) === 0)
   await sweep(gone)
   await press(Key.DELETE)
-  await until('the group to go', async () => (await groupNames()).length === all.length - 1)
+  await answerDelete('sparks')
+  await until('the view and its sparks to go', async () => (await viewNames()).length === all.length - 1 && (await sparkCount()) === sparks - 2)
   await click('#undo')
-  await until('the group to return', async () => (await groupNames()).length === all.length)
-  await js("document.querySelector('.Group').click()")
+  await until('the view to return', async () => (await viewNames()).length === all.length)
   await sweep(0, all.length - 1)
   assert.equal(await marked(), all.length)
   await click('#trash')
-  await until('the refusal', async () => (await notification()) === 'One group has to stay')
-  assert.equal((await groupNames()).length, all.length)
-  assert.equal(await marked(), all.length)
-  await press(Key.ESCAPE)
+  await answerDelete('view')
+  await until('All and Unlabeled alone', async () => (await viewNames()).join() === 'All,Unlabeled')
+  await click('#undo')
+  await until('the views to return', async () => (await viewNames()).length === all.length)
   await edit()
 })
 
-test("the trash takes one spark, a selection, one group or all that's marked", async () => {
+test("the trash takes one spark, a selection, one view or all that's marked", async () => {
   await home()
   await js("document.querySelector('.Group').click()")
   await edit()
@@ -892,9 +921,9 @@ test("the trash takes one spark, a selection, one group or all that's marked", a
   assert.equal(await text('#trash'), 'Drop to delete')
   await js("document.dispatchEvent(new DragEvent('dragend', { bubbles: true }))")
   assert.equal(await text('#trash'), 'Delete')
-  const all = await groupNames()
+  const all = await viewNames()
   const show = async (name: string, sparks: number): Promise<void> => {
-    await js("document.querySelectorAll('.Group')[arguments[0]].click()", (await groupNames()).indexOf(name))
+    await js("document.querySelectorAll('.Group')[arguments[0]].click()", (await viewNames()).indexOf(name))
     await until('the sparks', async () => (await sparkCount()) === sparks)
   }
   await show('Gone', 2)
@@ -910,23 +939,26 @@ test("the trash takes one spark, a selection, one group or all that's marked", a
   await until('the selection to return', async () => (await sparkCount()) === 2)
   await show('Keep', 1)
   await dropOnTrash('#groups .Group:last-child .Handle')
-  await until('the unmarked group to go', async () => (await groupNames()).length === all.length - 1)
+  await answerDelete('view')
+  await until('the unmarked view to go', async () => (await viewNames()).length === all.length - 1)
   await click('#undo')
-  await until('the group to return', async () => (await groupNames()).length === all.length)
+  await until('the view to return', async () => (await viewNames()).length === all.length)
   await js("document.querySelector('.Group').click()")
-  await sweep((await groupNames()).indexOf('Keep'), (await groupNames()).indexOf('Gone'))
+  await sweep((await viewNames()).indexOf('Keep'), (await viewNames()).indexOf('Gone'))
   assert.equal(await marked(), 2)
   await dropOnTrash('#groups .Group:last-child .Handle')
-  await until('both groups to go', async () => (await groupNames()).length === all.length - 2)
+  await answerDelete('view')
+  await until('both views to go', async () => (await viewNames()).length === all.length - 2)
   await click('#undo')
-  await until('both to return', async () => (await groupNames()).length === all.length)
+  await until('both to return', async () => (await viewNames()).length === all.length)
   await click('[data-action="trash"]')
-  assert.equal(await notification(), 'Drag sparks or groups here to delete them')
+  assert.equal(await notification(), 'Drag sparks or views here to delete them')
   await edit()
 })
 
 test('a selection lost by a misclick comes back with Undo, and Redo takes it away again', async () => {
   await home()
+  await addView('Misclick')
   await addSpark('third')
   await addSpark('fourth')
   await edit()
@@ -1019,7 +1051,7 @@ const FAINT_TEXT = `
 test('text reads on every color, in light and dark, with nothing and something marked', async () => {
   await home()
   await addSpark('readable')
-  await addGroup('Another')
+  await addView('Another')
   await addSpark('readable-too')
   await edit()
   const custom = (hex: string): Promise<void> =>
@@ -1077,7 +1109,7 @@ test('the tab shows the flame', async () => {
   assert.match(image, /svg/) // Firefox hands it on as data
 })
 
-test("Firefox's menu lists New Group, Remove, a line, then the groups, and adds a spark", async () => {
+test("Firefox's menu lists New View, Remove, a line, then the views, and adds a spark", async () => {
   await driver.get(`${base}/page`)
   await driver
     .actions()
@@ -1088,9 +1120,10 @@ test("Firefox's menu lists New Group, Remove, a line, then the groups, and adds 
   const entries = await js<string[]>(`
     const root = [...document.querySelectorAll('#contentAreaContextMenu > menu')].find((node) => node.label === 'Add to FireDial')
     return [...root.menupopup.children].map((node) => node.localName === 'menuseparator' ? '---' : node.label)`)
-  assert.deepEqual(entries.slice(0, 3), ['New Group', 'Remove from FireDial', '---'])
+  assert.deepEqual(entries.slice(0, 3), ['New View', 'Remove from FireDial', '---'])
+  assert.ok(!entries.includes('All') && entries.includes('Unlabeled'), entries.join())
   await js(`
-    const item = [...document.querySelectorAll('#contentAreaContextMenu [id*="firedial"]')].find((node) => node.id.endsWith('add-to-new-group'))
+    const item = [...document.querySelectorAll('#contentAreaContextMenu [id*="firedial"]')].find((node) => node.id.endsWith('add-to-new-view'))
     item.doCommand()
     document.getElementById('contentAreaContextMenu').hidePopup()`)
   await driver.setContext(firefox.Context.CONTENT)

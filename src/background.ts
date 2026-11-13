@@ -1,7 +1,8 @@
-// "Add to FireDial ▸ <group>" in Firefox's context menu everywhere: one item for all contexts,
-// no URL restriction. Links add the link, everything else the page.
-// "New Group" adds to a new group, named automatically; rename it in FireDial.
-// "Remove from FireDial" takes the same link or page out of every group. Extensions learn the
+// "Add to FireDial ▸ <view>" in Firefox's context menu everywhere: one item for all contexts,
+// no URL restriction. Links add the link, everything else the page. A view gives the spark its
+// label; Unlabeled adds it without one.
+// "New View" adds to a new view, named automatically; rename it in FireDial.
+// "Remove from FireDial" deletes sparks with the same link or page. Extensions learn the
 // page only with the click, so it's always enabled and the click finds out.
 // Also keeps the native bookmarks in sync with the store.
 
@@ -9,18 +10,18 @@ import * as z from 'zod/mini'
 
 import { parseBackup } from './backup.ts'
 import { BookmarkSync, hasBookmarkFolder, samePage } from './bookmarks.ts'
-import { allocGroup, allocSpark, emptyDoc, GroupId, isVanilla, newThumbId, nextGroupName, SparkId, toLabel, toSparkUrl } from './model.ts'
+import { addTo, allocSpark, allocView, isVanilla, newThumbId, nextViewName, SparkId, toLabel, toSparkUrl, ViewId } from './model.ts'
 import type { Doc } from './model.ts'
 import { browserKeyValue, Store, webLock } from './store.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 import type { Reveal } from './ui/toast.ts'
 
-const ADD_PREFIX = 'add-to-group-'
-const NEW_GROUP = 'add-to-new-group'
+const ADD_PREFIX = 'add-to-view-'
+const NEW_VIEW = 'add-to-new-view'
 const REMOVE = 'remove-from-firedial'
 const THUMB_WIDTH = 640
 const DAY = 86_400_000 // ms
-const RevealMessage = z.object({ groupId: GroupId, sparkId: SparkId })
+const RevealMessage = z.object({ viewId: ViewId, sparkId: SparkId })
 
 const store = new Store(browserKeyValue, webLock)
 const contexts: browser.menus.ContextType[] = ['all', 'tab']
@@ -30,13 +31,13 @@ async function buildMenu(): Promise<void> {
   await store.load().catch((error: unknown) => {
     console.error('FireDial menu:', error)
   })
-  const groups = store.doc.groups.length ? store.doc.groups : emptyDoc().groups
+  const views = store.doc.views.filter((view) => view.kind !== 'all')
   browser.menus.create({ contexts, id: 'add-root', title: 'Add to FireDial' }) // Firefox allows an extension one entry here, always with the manifest's icon
-  browser.menus.create({ contexts, id: NEW_GROUP, parentId: 'add-root', title: 'New Group' })
+  browser.menus.create({ contexts, id: NEW_VIEW, parentId: 'add-root', title: 'New View' })
   browser.menus.create({ contexts, id: REMOVE, parentId: 'add-root', title: 'Remove from FireDial' })
   browser.menus.create({ contexts, id: 'add-separator', parentId: 'add-root', type: 'separator' })
-  for (const group of groups) {
-    browser.menus.create({ contexts, id: ADD_PREFIX + group.id, parentId: 'add-root', title: group.title })
+  for (const view of views) {
+    browser.menus.create({ contexts, id: ADD_PREFIX + view.id, parentId: 'add-root', title: view.title })
   }
 }
 
@@ -62,8 +63,8 @@ async function toast(tab: browser.tabs.Tab | undefined, text: string, reveal: Re
 }
 
 // In a new tab, so the page the spark came from stays. The tab reads the spark to show from storage.
-async function revealSpark({ groupId, sparkId }: Reveal, tab: browser.tabs.Tab | undefined): Promise<void> {
-  await browserKeyValue.set({ activeGroup: groupId, reveal: sparkId })
+async function revealSpark({ viewId, sparkId }: Reveal, tab: browser.tabs.Tab | undefined): Promise<void> {
+  await browserKeyValue.set({ activeView: viewId, reveal: sparkId })
   await browser.tabs.create(tab?.windowId === undefined ? {} : { windowId: tab.windowId })
 }
 
@@ -81,7 +82,7 @@ async function screenshot(tab: browser.tabs.Tab): Promise<string> {
   }
 }
 
-async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab | undefined, groupId: GroupId | null): Promise<void> {
+async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab | undefined, viewId: ViewId | null): Promise<void> {
   const isLink = Boolean(info.linkUrl)
   const url = toSparkUrl(targetUrl(info, tab))
   if (!url || url.startsWith('moz-extension:')) return
@@ -95,15 +96,16 @@ async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab |
   const added: (Reveal & { name: string })[] = []
   await store.commit(
     (doc: Doc) => {
-      const target = groupId ?? allocGroup(doc, nextGroupName(doc.groups)).id
-      const spark = allocSpark(doc, { groupId: target, title, url, thumb })
-      added.push({ groupId: target, sparkId: spark.id, name: doc.groups.find((group) => group.id === target)?.title ?? '' })
-      return target
+      const view = (viewId === null ? undefined : doc.views.find((each) => each.id === viewId)) ?? allocView(doc, nextViewName(doc.views))
+      const spark = allocSpark(doc, { title, url, thumb })
+      addTo([spark], view)
+      added.push({ viewId: view.id, sparkId: spark.id, name: view.title })
+      return view.id
     },
     thumb ? { thumbs: { [thumb]: src } } : {}
   )
   const [spark] = added
-  if (spark) await toast(tab, `Added to ${spark.name}`, { groupId: spark.groupId, sparkId: spark.sparkId })
+  if (spark) await toast(tab, `Added to ${spark.name}`, { viewId: spark.viewId, sparkId: spark.sparkId })
 }
 
 async function removeSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab | undefined): Promise<void> {
@@ -122,9 +124,9 @@ async function removeSpark(info: browser.menus.OnClickData, tab: browser.tabs.Ta
 
 browser.menus.onClicked.addListener((info, tab) => {
   const id = String(info.menuItemId)
-  if (id === NEW_GROUP) void addSpark(info, tab, null)
+  if (id === NEW_VIEW) void addSpark(info, tab, null)
   else if (id === REMOVE) void removeSpark(info, tab)
-  else if (id.startsWith(ADD_PREFIX)) void addSpark(info, tab, GroupId.parse(Number(id.slice(ADD_PREFIX.length))))
+  else if (id.startsWith(ADD_PREFIX)) void addSpark(info, tab, ViewId.parse(Number(id.slice(ADD_PREFIX.length))))
 })
 
 // Images of undone history pile up slowly: once a day is plenty.
@@ -139,7 +141,7 @@ async function dailyCleanup(): Promise<void> {
 const sync = new BookmarkSync(store, browserKeyValue, browser.bookmarks)
 
 browserKeyValue.onChanged((keys) => {
-  if (keys.has('groups')) rebuildMenu()
+  if (keys.has('views')) rebuildMenu()
   if (keys.has('rev')) void sync.requestPush()
 })
 

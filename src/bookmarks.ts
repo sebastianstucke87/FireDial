@@ -1,16 +1,18 @@
 // Two-way sync with native bookmarks, for Firefox Sync and bookmark tools: a "FireDial" folder
-// in Other Bookmarks, one subfolder per group, one bookmark per spark. Images stay local.
+// in Other Bookmarks with one bookmark per spark, in All's order, plus data bookmarks for the
+// labels and the views. Images stay local.
 //
 // Push makes the bookmarks match the store after a change in FireDial, pull makes the store match
 // the bookmarks after a change in Firefox. Both only compare and fix, so running either one again
 // changes nothing, and the bookmark events of a push run into a pull that finds nothing to do.
 // Pull goes through the store like any change, so even a deletion in Firefox can be undone.
-// Push never removes what it doesn't know: only bookmarks and folders it made or adopted.
+// Push never removes what it doesn't know: only bookmarks it made or adopted. Folders inside
+// FireDial's folder are left alone.
 
 import * as z from 'zod/mini'
 
-import { allocGroup, allocSpark, canonicalize, GroupId, listOf, SparkId, toLabel, toSparkUrl } from './model.ts'
-import type { Doc, Spark } from './model.ts'
+import { allocSpark, canonicalize, labelKey, listOf, makeView, SparkId, toLabel, toLabelNames, toSparkUrl, View, ViewId } from './model.ts'
+import type { Doc, LabelName, Spark } from './model.ts'
 import type { KeyValue, Store } from './store.ts'
 
 const ROOT_PARENT = 'unfiled_____' // Other Bookmarks
@@ -38,28 +40,89 @@ export interface BookmarkApi {
 
 interface BookmarkMap {
   root: string | null
-  groups: Map<GroupId, string>
   sparks: Map<SparkId, string>
 }
 
-const emptyMap = (): BookmarkMap => ({ root: null, groups: new Map(), sparks: new Map() })
+const emptyMap = (): BookmarkMap => ({ root: null, sparks: new Map() })
 
 const entries = <S extends z.ZodMiniType>(key: S) => z.catch(listOf(z.tuple([key, z.string()])), [])
-const MapSchema = z.object({ root: z.catch(z.nullable(z.string()), null), groups: entries(GroupId), sparks: entries(SparkId) })
+const MapSchema = z.object({ root: z.catch(z.nullable(z.string()), null), sparks: entries(SparkId) })
 
 export function parseMap(raw: unknown): BookmarkMap {
   const result = MapSchema.safeParse(raw)
   if (!result.success) return emptyMap()
-  const { root, groups, sparks } = result.data
-  return { root, groups: new Map(groups), sparks: new Map(sparks) }
+  const { root, sparks } = result.data
+  return { root, sparks: new Map(sparks) }
 }
 
-const serializeMap = (map: BookmarkMap): Record<string, unknown> => ({ root: map.root, groups: [...map.groups], sparks: [...map.sparks] })
+const serializeMap = (map: BookmarkMap): Record<string, unknown> => ({ root: map.root, sparks: [...map.sparks] })
 
-const isFolder = (node: TreeNode): boolean => node.type === 'folder'
-const isBookmark = (node: TreeNode): boolean => node.type === 'bookmark'
-const childFolders = (node: TreeNode): TreeNode[] => (node.children ?? []).filter(isFolder)
+// Labels and views travel in bookmarks of their own in the FireDial folder, as JSON in the address
+// of a domain that never exists. Sparks are named by their bookmark id there, which Firefox Sync
+// keeps. Firefox takes addresses up to about 65 000 characters, so the JSON is split over as many
+// as it takes.
+const DATA = 'https://firedial.invalid/'
+const LABEL_DATA = `${DATA}labels/`
+const VIEW_DATA = `${DATA}views/`
+const LABEL_DATA_TITLE = 'FireDial labels'
+const VIEW_DATA_TITLE = 'FireDial views'
+const DATA_CHUNK = 60_000 // characters of JSON in one address
+
+const isData = (node: TreeNode): boolean => node.type === 'bookmark' && (node.url ?? '').startsWith(DATA)
+const isBookmark = (node: TreeNode): boolean => node.type === 'bookmark' && !isData(node)
 const childBookmarks = (node: TreeNode): TreeNode[] => (node.children ?? []).filter(isBookmark)
+const dataOf = (root: TreeNode, prefix: string): TreeNode[] => (root.children ?? []).filter((node) => isData(node) && (node.url ?? '').startsWith(prefix))
+
+// The addresses that hold this value: part/parts#JSON, in order.
+function dataUrls(prefix: string, value: unknown): string[] {
+  const text = encodeURIComponent(JSON.stringify(value))
+  const chunks: string[] = []
+  for (let start = 0; start < text.length; start += DATA_CHUNK) chunks.push(text.slice(start, start + DATA_CHUNK))
+  return chunks.map((chunk, index) => `${prefix}${index + 1}-${chunks.length}#${chunk}`)
+}
+
+// The value; undefined without data bookmarks, or with some of them missing or broken.
+function readData(prefix: string, nodes: readonly TreeNode[]): unknown {
+  const parts = new Map<number, string>()
+  let total = 0
+  for (const node of nodes) {
+    const match = /^(\d+)-(\d+)#(.*)$/s.exec((node.url ?? '').slice(prefix.length))
+    if (!match) return undefined
+    const [, index, count, chunk] = match
+    if (total && total !== Number(count)) return undefined
+    total = Number(count)
+    parts.set(Number(index), chunk ?? '')
+  }
+  if (!total || parts.size !== total) return undefined
+  try {
+    return JSON.parse(decodeURIComponent(Array.from({ length: total }, (_, index) => parts.get(index + 1) ?? '').join('')))
+  } catch {
+    return undefined
+  }
+}
+
+export const labelDataUrls = (labels: Readonly<Record<string, readonly LabelName[]>>): string[] => dataUrls(LABEL_DATA, labels)
+
+const LabelData = z.record(z.string(), z.catch(z.array(z.unknown()), []))
+
+// The labels by bookmark id; null without label bookmarks, or with broken ones, for then they say
+// nothing about which labels a spark has.
+export function readLabelData(nodes: readonly TreeNode[]): Map<string, LabelName[]> | null {
+  const data = LabelData.safeParse(readData(LABEL_DATA, nodes))
+  return data.success ? new Map(Object.entries(data.data).map(([id, labels]) => [id, toLabelNames(labels)])) : null
+}
+
+// A view as synced: its order by bookmark id.
+const SyncedView = z.object({ ...View.shape, id: z.optional(z.unknown()), order: z.catch(listOf(z.string()), []) })
+type SyncedView = z.infer<typeof SyncedView>
+const ViewData = listOf(SyncedView)
+
+export const viewDataUrls = (views: readonly SyncedView[]): string[] => dataUrls(VIEW_DATA, views)
+
+export function readViewData(nodes: readonly TreeNode[]): SyncedView[] | null {
+  const raw = readData(VIEW_DATA, nodes)
+  return raw === undefined ? null : ViewData.parse(raw)
+}
 
 // Firefox stores URLs normalized: https://a.example becomes https://a.example/.
 function canonicalUrl(url: string): string {
@@ -95,60 +158,51 @@ function sortRanked<Item extends { id: number }>(items: readonly Item[], rank: R
   return items.map((item) => (rank.has(item.id) ? (ranked[next++] ?? item) : item))
 }
 
-// Pull: the doc takes over the tree. New folders and bookmarks become groups and sparks, what's
-// gone from the tree goes from the doc. Sparks a push couldn't map stay. A bookmark directly in
-// the root folder joins the first group.
-function applyTree(doc: Doc, root: TreeNode, map: BookmarkMap): void {
-  const groupIds = reversed(map.groups)
-  const sparkIds = reversed(map.sparks)
-  const groups = new Map(doc.groups.map((group) => [group.id, group]))
-  const sparks = new Map(doc.sparks.map((spark) => [spark.id, spark]))
-  const seenGroups = new Set<GroupId>()
-  const seenSparks = new Set<SparkId>()
-  const position = new Map<number, number>()
+// The views as the bookmarks have them: views keep their ids where kind, or title for a normal
+// view, match. An order names sparks by bookmark id; sparks it doesn't know go to the end.
+function applyViews(doc: Doc, synced: readonly SyncedView[], sparkIds: ReadonlyMap<string, SparkId>): void {
+  const keyOf = (view: { kind: View['kind']; title: string }): string => (view.kind === 'normal' ? `normal:${labelKey(view.title)}` : view.kind)
+  const existing = new Map(doc.views.map((view) => [keyOf(view), view]))
+  doc.views = synced.map((item) => {
+    const view = existing.get(keyOf(item)) ?? makeView(ViewId.parse(doc.nextViewId++), item.kind, item.title)
+    return { ...view, title: item.title, sort: item.sort, rule: item.rule, order: item.order.flatMap((id) => sparkIds.get(id) ?? []) }
+  })
+}
 
-  const place = (node: TreeNode, groupId: GroupId): void => {
+// Pull: the doc takes over the folder. New bookmarks become sparks, what's gone from the folder
+// goes from the doc, and the order of the bookmarks is All's order. Sparks a push couldn't map stay.
+function applyTree(doc: Doc, root: TreeNode, map: BookmarkMap): void {
+  const sparkIds = reversed(map.sparks)
+  const sparks = new Map(doc.sparks.map((spark) => [spark.id, spark]))
+  const seen = new Set<SparkId>()
+  const position = new Map<number, number>()
+  const labels = readLabelData(dataOf(root, LABEL_DATA))
+
+  for (const node of childBookmarks(root)) {
     const known = sparkIds.get(node.id)
     const spark = known === undefined ? undefined : sparks.get(known)
-    if (spark) seenSparks.add(spark.id)
     const url = toSparkUrl(node.url ?? '')
-    if (!url) return
-    const target: Spark = spark ?? allocSpark(doc, { groupId, title: toLabel(node.title), url, thumb: null })
+    if (spark) seen.add(spark.id)
+    if (!url) continue
+    const target: Spark = spark ?? allocSpark(doc, { title: toLabel(node.title), url, thumb: null })
     map.sparks.set(target.id, node.id)
-    seenSparks.add(target.id)
+    seen.add(target.id)
     target.title = toLabel(node.title)
-    target.groupId = groupId
     if (!sameUrl(target.url, url)) target.url = url
+    if (labels) target.labels = labels.get(node.id) ?? []
     position.set(target.id, position.size)
   }
 
-  for (const folder of childFolders(root)) {
-    const known = groupIds.get(folder.id)
-    const group = (known === undefined ? undefined : groups.get(known)) ?? allocGroup(doc, toLabel(folder.title))
-    group.title = toLabel(folder.title)
-    map.groups.set(group.id, folder.id)
-    seenGroups.add(group.id)
-    for (const node of childBookmarks(folder)) place(node, group.id)
-  }
-  const first = childFolders(root)[0] ? [...seenGroups][0] : doc.groups[0]?.id
-  if (first !== undefined) {
-    for (const node of childBookmarks(root)) place(node, first)
-  }
-
-  for (const id of map.groups.keys()) {
-    if (!seenGroups.has(id)) map.groups.delete(id)
-  }
   for (const id of map.sparks.keys()) {
-    if (!seenSparks.has(id)) map.sparks.delete(id)
+    if (!seen.has(id)) map.sparks.delete(id)
   }
-  const mappedGroups = new Set(groupIds.values())
-  const mappedSparks = new Set(sparkIds.values())
-  doc.groups = doc.groups.filter((group) => seenGroups.has(group.id) || !mappedGroups.has(group.id))
-  doc.sparks = doc.sparks.filter((spark) => seenSparks.has(spark.id) || !mappedSparks.has(spark.id))
-
-  doc.groups = sortRanked(doc.groups, new Map([...seenGroups].map((id, index) => [id, index])))
-  canonicalize(doc)
-  doc.sparks = sortRanked(doc.sparks, position)
+  const mapped = new Set(sparkIds.values())
+  doc.sparks = sortRanked(
+    doc.sparks.filter((spark) => seen.has(spark.id) || !mapped.has(spark.id)),
+    position
+  )
+  const views = readViewData(dataOf(root, VIEW_DATA))
+  if (views) applyViews(doc, views, reversed(map.sparks))
   canonicalize(doc)
 }
 
@@ -162,16 +216,15 @@ async function fetchRoot(api: BookmarkApi, id: string): Promise<TreeNode | null>
 
 // FireDial's folder is in the bookmarks already, e.g. brought by Firefox Sync from another device.
 export async function hasBookmarkFolder(api: BookmarkApi): Promise<boolean> {
-  return (await api.getChildren(ROOT_PARENT)).some((node) => isFolder(node) && node.title === ROOT_TITLE)
+  return (await api.getChildren(ROOT_PARENT)).some((node) => node.type === 'folder' && node.title === ROOT_TITLE)
 }
 
 // The root folder. It comes back if it's gone: deleting it must not wipe FireDial.
 async function ensureRoot(api: BookmarkApi, map: BookmarkMap): Promise<TreeNode> {
   const current = map.root === null ? null : await fetchRoot(api, map.root)
   if (current) return current
-  map.groups.clear()
   map.sparks.clear()
-  const existing = (await api.getChildren(ROOT_PARENT)).find((node) => isFolder(node) && node.title === ROOT_TITLE)
+  const existing = (await api.getChildren(ROOT_PARENT)).find((node) => node.type === 'folder' && node.title === ROOT_TITLE)
   const id = existing?.id ?? (await api.create({ parentId: ROOT_PARENT, title: ROOT_TITLE })).id
   map.root = id
   const root = await fetchRoot(api, id)
@@ -203,47 +256,26 @@ class Pusher {
     }
   }
 
-  private async pushGroups(doc: Doc, root: TreeNode): Promise<Map<GroupId, TreeNode | null>> {
-    const folders = new Map(childFolders(root).map((node) => [node.id, node]))
-    const taken = new Set(this.map.groups.values())
-    const result = new Map<GroupId, TreeNode | null>()
-    for (const group of doc.groups) {
-      const mapped = this.map.groups.get(group.id)
-      const existing = mapped === undefined ? undefined : folders.get(mapped)
-      // A folder nobody claims with this name: an interrupted first sync, or a reinstall.
-      const folder = existing ?? childFolders(root).find((node) => node.title === group.title && !taken.has(node.id))
-      if (folder) {
-        taken.add(folder.id)
-        this.map.groups.set(group.id, folder.id)
-        result.set(group.id, folder)
-        if (folder.title !== group.title) await this.attempt(() => this.api.update(folder.id, { title: group.title }))
-        continue
-      }
-      const created = await this.attempt(() => this.api.create({ parentId: root.id, title: group.title }))
-      if (created) {
-        this.map.groups.set(group.id, created.id)
-        result.set(group.id, { id: created.id, title: group.title, type: 'folder', children: [] })
-      }
+  private async removeStale(doc: Doc, root: TreeNode): Promise<void> {
+    const sparkIds = new Set(doc.sparks.map((spark) => spark.id))
+    const present = new Set(childBookmarks(root).map((node) => node.id))
+    for (const [id, bookmarkId] of this.map.sparks) {
+      if (sparkIds.has(id)) continue
+      this.map.sparks.delete(id)
+      if (present.has(bookmarkId)) await this.attempt(() => this.api.remove(bookmarkId))
     }
-    return result
   }
 
-  private async pushSparks(doc: Doc, root: TreeNode, folders: ReadonlyMap<GroupId, TreeNode | null>): Promise<void> {
-    const bookmarks = new Map(
-      childFolders(root)
-        .flatMap(childBookmarks)
-        .concat(childBookmarks(root))
-        .map((node) => [node.id, node])
-    )
+  private async pushSparks(doc: Doc, root: TreeNode): Promise<void> {
+    const bookmarks = new Map(childBookmarks(root).map((node) => [node.id, node]))
     const taken = new Set(this.map.sparks.values())
     for (const spark of doc.sparks) {
-      const folder = folders.get(spark.groupId)
-      if (!folder) continue
       const mapped = this.map.sparks.get(spark.id)
       const existing = mapped === undefined ? undefined : bookmarks.get(mapped)
-      const node = existing ?? childBookmarks(folder).find((item) => sameUrl(item.url ?? '', spark.url) && !taken.has(item.id))
+      // A bookmark nobody claims with this address: an interrupted first sync, or a reinstall.
+      const node = existing ?? childBookmarks(root).find((item) => sameUrl(item.url ?? '', spark.url) && !taken.has(item.id))
       if (!node) {
-        const created = await this.attempt(() => this.api.create({ parentId: folder.id, title: spark.title, url: spark.url }))
+        const created = await this.attempt(() => this.api.create({ parentId: root.id, title: spark.title, url: spark.url }))
         if (created) this.map.sparks.set(spark.id, created.id)
         continue
       }
@@ -255,80 +287,74 @@ class Pusher {
     }
   }
 
-  private async removeStale(doc: Doc, root: TreeNode): Promise<void> {
-    const sparkIds = new Set(doc.sparks.map((spark) => spark.id))
-    const groupIds = new Set(doc.groups.map((group) => group.id))
-    const present = new Set(
-      childFolders(root)
-        .flatMap(childBookmarks)
-        .concat(childBookmarks(root))
-        .map((node) => node.id)
-    )
-    const folders = new Set(childFolders(root).map((node) => node.id))
-    for (const [id, bookmarkId] of this.map.sparks) {
-      if (sparkIds.has(id)) continue
-      this.map.sparks.delete(id)
-      if (present.has(bookmarkId)) await this.attempt(() => this.api.remove(bookmarkId))
-    }
-    for (const [id, folderId] of this.map.groups) {
-      if (groupIds.has(id)) continue
-      this.map.groups.delete(id)
-      if (folders.has(folderId)) await this.attempt(() => this.api.removeTree(folderId))
-    }
-  }
-
-  private async order(parentId: string, children: readonly TreeNode[], wanted: readonly (string | undefined)[]): Promise<void> {
-    const current = children.map((node) => node.id)
-    let index = 0
-    for (const id of wanted) {
-      if (id === undefined) continue
-      const from = current.indexOf(id)
-      if (from < 0) continue
-      if (from !== index) {
-        await this.attempt(() => this.api.move(id, { parentId, index }))
-        current.splice(from, 1)
-        current.splice(index, 0, id)
-      }
-      index += 1
-    }
-  }
-
-  // Moves into the right folder first, then puts everything in order, from a fresh look at the tree.
+  // The bookmarks in All's order at the top of the folder, from a fresh look at it; data
+  // bookmarks and folders follow.
   private async arrange(doc: Doc, rootId: string): Promise<void> {
     const root = await fetchRoot(this.api, rootId)
     if (!root) return
-    const parentOf = new Map(childFolders(root).flatMap((folder) => childBookmarks(folder).map((node) => [node.id, folder.id])))
-    for (const node of childBookmarks(root)) parentOf.set(node.id, root.id)
-    let moved = false
-    for (const spark of doc.sparks) {
-      const id = this.map.sparks.get(spark.id)
-      const folderId = this.map.groups.get(spark.groupId)
-      if (id === undefined || folderId === undefined || parentOf.get(id) === folderId) continue
-      await this.attempt(() => this.api.move(id, { parentId: folderId, index: 0 }))
-      moved = true
-    }
-    const fresh = moved ? await fetchRoot(this.api, rootId) : root
-    if (!fresh) return
-    await this.order(
-      fresh.id,
-      fresh.children ?? [],
-      doc.groups.map((group) => this.map.groups.get(group.id))
-    )
-    for (const group of doc.groups) {
-      const folderId = this.map.groups.get(group.id)
-      const folder = childFolders(fresh).find((node) => node.id === folderId)
-      if (!folder) continue
-      const ids = doc.sparks.filter((spark) => spark.groupId === group.id).map((spark) => this.map.sparks.get(spark.id))
-      await this.order(folder.id, folder.children ?? [], ids)
+    const current = (root.children ?? []).map((node) => node.id)
+    const wanted = doc.sparks.flatMap((spark) => this.map.sparks.get(spark.id) ?? []).filter((id) => current.includes(id))
+    for (const [index, id] of wanted.entries()) {
+      if (current[index] === id) continue
+      await this.attempt(() => this.api.move(id, { parentId: root.id, index }))
+      current.splice(current.indexOf(id), 1)
+      current.splice(index, 0, id)
     }
   }
 
+  // Writes data bookmarks only where they differ.
+  private async writeData(root: TreeNode, nodes: readonly TreeNode[], urls: readonly string[], title: string): Promise<void> {
+    for (const [index, url] of urls.entries()) {
+      const node = nodes[index]
+      if (!node) await this.attempt(() => this.api.create({ parentId: root.id, title, url }))
+      else if (node.url !== url) await this.attempt(() => this.api.update(node.id, { url }))
+    }
+    for (const node of nodes.slice(urls.length)) await this.attempt(() => this.api.remove(node.id))
+  }
+
+  // None at all while no spark ever had a label. A push speaks only for its own sparks: labels of
+  // bookmarks it hasn't pulled yet, say on a device that just started syncing, stay as they are.
+  private async pushLabels(doc: Doc, root: TreeNode): Promise<void> {
+    const nodes = dataOf(root, LABEL_DATA)
+    const present = new Set(childBookmarks(root).map((node) => node.id))
+    const own = new Set(this.map.sparks.values())
+    const labels: Record<string, LabelName[]> = {}
+    for (const [id, kept] of readLabelData(nodes) ?? []) {
+      if (present.has(id) && !own.has(id) && kept.length) labels[id] = kept
+    }
+    for (const spark of doc.sparks) {
+      const id = this.map.sparks.get(spark.id)
+      if (id !== undefined && spark.labels.length) labels[id] = spark.labels
+    }
+    if (!nodes.length && !Object.keys(labels).length) return
+    const sorted = Object.fromEntries(Object.entries(labels).sort(([a], [b]) => a.localeCompare(b))) // a reorder changes no label
+    const urls = Object.keys(sorted).length || present.size ? labelDataUrls(sorted) : [] // no bookmark left to label
+    await this.writeData(root, nodes, urls, LABEL_DATA_TITLE)
+  }
+
+  // A device that hasn't synced yet leaves views it finds alone: the pull after this push takes them.
+  private async pushViews(doc: Doc, root: TreeNode, fresh: boolean): Promise<void> {
+    if (fresh && readViewData(dataOf(root, VIEW_DATA))) return
+    const views = doc.views.map(({ kind, title, sort, rule, order }) => ({
+      kind,
+      title,
+      sort,
+      rule,
+      order: order.flatMap((id) => this.map.sparks.get(id) ?? [])
+    }))
+    await this.writeData(root, dataOf(root, VIEW_DATA), viewDataUrls(views), VIEW_DATA_TITLE)
+  }
+
   async push(doc: Doc): Promise<void> {
+    const fresh = this.map.root === null
     await this.removeStale(doc, await ensureRoot(this.api, this.map))
     const root = await ensureRoot(this.api, this.map) // what's left: nothing removed may be adopted
-    const folders = await this.pushGroups(doc, root)
-    await this.pushSparks(doc, root, folders)
+    await this.pushSparks(doc, root)
     await this.arrange(doc, root.id)
+    const now = await fetchRoot(this.api, root.id)
+    if (!now) return
+    await this.pushLabels(doc, now)
+    await this.pushViews(doc, now, fresh)
   }
 }
 
@@ -431,8 +457,6 @@ export class BookmarkSync {
       this.wantPull = true
       return
     }
-    const loose = childBookmarks(root).length > 0
-    await this.kv.set({ bookmarkMap: serializeMap(map), syncedRev: loose ? syncedRev : this.store.revision })
-    if (loose) this.wantPush = true // into their group's folder
+    await this.kv.set({ bookmarkMap: serializeMap(map), syncedRev: this.store.revision })
   }
 }

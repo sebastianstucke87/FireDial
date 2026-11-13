@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { allocGroup, allocSpark, emptyDoc, GroupId, LimitError, LIMITS, newThumbId, nextGroupName, SparkId, SparkUrl, toLabel } from './model.ts'
+import { addTo, allocSpark, allocView, emptyDoc, LabelName, LimitError, LIMITS, makeView, newThumbId, SparkId, SparkUrl, toLabel, ViewId } from './model.ts'
 import type { Doc, Spark } from './model.ts'
 import { Store, thumbKey } from './store.ts'
 import type { KeyValue, Lock } from './store.ts'
@@ -46,15 +46,11 @@ function queue(): Lock {
 
 const url = (text: string): SparkUrl => SparkUrl.parse(text)
 
-function addSpark(doc: Doc, title: string, groupId?: GroupId): Spark {
-  const target = groupId ?? doc.groups[0]?.id
-  assert.notEqual(target, undefined)
-  return allocSpark(doc, {
-    groupId: target ?? doc.groups[0]?.id ?? allocGroup(doc, toLabel('x')).id,
-    title: toLabel(title),
-    url: url(`https://${title}.example/`),
-    thumb: null
-  })
+function addSpark(doc: Doc, title: string, viewId?: ViewId): Spark {
+  const spark = allocSpark(doc, { title: toLabel(title), url: url(`https://${title}.example/`), thumb: null })
+  const view = doc.views.find((each) => each.id === viewId)
+  if (view) addTo([spark], view)
+  return spark
 }
 
 const add = (store: Store, title: string): Promise<boolean> =>
@@ -156,41 +152,44 @@ test('undo restores a removed spark at its place, image included', async () => {
   assert.equal((await store.thumbs([thumb])).get(thumb), 'data:image')
 })
 
-test('undo restores a removed group with its sparks and returns to it', async () => {
+test('undo restores a removed view with its sparks and returns to it', async () => {
   const [store] = await tabs(1)
   assert.ok(store)
-  let groupId: GroupId | undefined
+  let viewId: ViewId | undefined
   await store.commit((doc) => {
-    const group = allocGroup(doc, toLabel('Linux'))
-    groupId = group.id
-    addSpark(doc, 'distrosea', group.id)
-    return group.id
+    const view = allocView(doc, 'Linux')
+    viewId = view.id
+    addSpark(doc, 'distrosea', view.id)
+    return view.id
   })
-  assert.ok(groupId !== undefined)
-  const shown = groupId
+  assert.ok(viewId !== undefined)
+  const shown = viewId
   await store.commit(
     (doc) => {
-      doc.sparks = doc.sparks.filter((spark) => spark.groupId !== shown)
-      doc.groups = doc.groups.filter((group) => group.id !== shown)
+      doc.sparks = []
+      doc.views = doc.views.filter((view) => view.id !== shown)
       return undefined
     },
     { active: shown }
   )
-  assert.equal(store.doc.groups.length, 1)
+  assert.equal(store.doc.views.length, 2)
   assert.equal(await store.undo(), shown)
-  assert.equal(store.doc.groups.length, 2)
+  assert.equal(store.doc.views.length, 3)
   assert.deepEqual(titles(store), ['distrosea'])
 })
 
-test('removing the last group leaves a fresh one', async () => {
+test('removing every view leaves All and Unlabeled', async () => {
   const [store] = await tabs(1)
   assert.ok(store)
   await store.commit((doc) => {
-    doc.groups = []
+    doc.views = []
     return undefined
   })
-  assert.equal(store.doc.groups.length, 1)
-  assert.notEqual(store.doc.groups[0]?.id, 0)
+  assert.deepEqual(
+    store.doc.views.map((view) => view.kind),
+    ['all', 'unlabeled']
+  )
+  assert.notEqual(store.doc.views[0]?.id, 0)
 })
 
 test('a change touching nothing leaves no step', async () => {
@@ -205,7 +204,7 @@ test('#13: limits refuse a change and leave the doc alone', async () => {
   assert.ok(store)
   await assert.rejects(
     store.commit((doc) => {
-      for (let count = 0; count <= LIMITS.sparksPerGroup; count++) addSpark(doc, 'x')
+      for (let count = 0; count <= LIMITS.sparks; count++) addSpark(doc, 'x')
       return undefined
     }),
     LimitError
@@ -215,7 +214,7 @@ test('#13: limits refuse a change and leave the doc alone', async () => {
 })
 
 test('#13: the oldest undo steps fall off', async () => {
-  const kv = memory({ schema: 3, history: { first: 5, cursor: 5 + LIMITS.undo, end: 5 + LIMITS.undo } })
+  const kv = memory({ schema: 4, history: { first: 5, cursor: 5 + LIMITS.undo, end: 5 + LIMITS.undo } })
   const [store] = await tabs(1, kv)
   assert.ok(store)
   await add(store, 'a')
@@ -224,7 +223,7 @@ test('#13: the oldest undo steps fall off', async () => {
 })
 
 test('the first start runs once: a second load changes nothing', async () => {
-  const kv = memory({ groups: [{ id: 0, title: 'Home' }], sparks: [] })
+  const kv = memory({ views: [], sparks: [] })
   const [store] = await tabs(1, kv)
   assert.ok(store)
   await add(store, 'a')
@@ -240,8 +239,8 @@ test('import replaces everything and clears history', async () => {
   await add(store, 'old')
   const before = store.doc.nextSparkId
   await store.replaceAll({
-    groups: [{ key: 40, title: toLabel('Imported') }],
-    sparks: [{ groupKey: 40, title: toLabel('new'), url: url('https://new.example/'), src: 'data:new' }],
+    views: [{ kind: 'normal', title: LabelName.parse('Imported'), sort: 'manual', rule: { all: false, include: [], exclude: [] }, order: [40] }],
+    sparks: [{ key: 40, title: toLabel('new'), url: url('https://new.example/'), src: 'data:new', labels: [LabelName.parse('Imported')] }],
     prefs: store.doc.prefs
   })
   assert.deepEqual(titles(store), ['new'])
@@ -310,12 +309,6 @@ test('colors are kept per image, and go with the image', async () => {
   assert.deepEqual([...(await store.colors())], [[kept, '#112233']])
 })
 
-test('#30: new groups count up', () => {
-  const groups = [{ id: GroupId.parse(0), title: toLabel('New Group #4') }]
-  assert.equal(nextGroupName(groups), 'New Group #5')
-  assert.equal(nextGroupName([]), 'New Group #1')
-})
-
 // Storage that also tells which keys each write had.
 function spied(initial: Record<string, unknown> = {}): ReturnType<typeof memory> & { writes: string[][] } {
   const kv = memory(initial)
@@ -338,11 +331,11 @@ test('the first start sets up an empty FireDial at revision 1, a later one reads
   assert.ok(store)
   assert.equal(store.revision, 1)
   assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Home']
+    store.doc.views.map((view) => view.title),
+    ['All', 'Unlabeled']
   )
   await store.commit((doc) => {
-    allocGroup(doc, toLabel('Work'))
+    allocView(doc, 'Work')
     doc.prefs.columns = 7
     return undefined
   })
@@ -352,14 +345,15 @@ test('the first start sets up an empty FireDial at revision 1, a later one reads
   assert.equal(kv.writes.length, writes, 'no write')
   assert.equal(again.revision, 2)
   assert.equal(again.doc.prefs.columns, 7)
-  assert.equal(again.doc.nextGroupId, 2)
+  assert.equal(again.doc.nextViewId, 3)
 })
 
 test('broken stored data reads as empty', async () => {
-  const kv = memory({ schema: 3, rev: 'x', groups: 'x', sparks: 7, prefs: null, nextIds: 'x', history: 'x' })
+  const kv = memory({ schema: 4, rev: 'x', views: 'x', sparks: 7, prefs: null, nextIds: 'x', history: 'x' })
   const [store] = await tabs(1, kv)
   assert.ok(store)
-  assert.deepEqual(store.doc, { ...emptyDoc(), groups: [{ id: 1, title: 'Home' }], nextGroupId: 2 })
+  const views = [makeView(ViewId.parse(3), 'all', LabelName.parse('All')), makeView(ViewId.parse(2), 'unlabeled', LabelName.parse('Unlabeled'))]
+  assert.deepEqual(store.doc, { ...emptyDoc(), views, nextViewId: 4 })
   assert.equal(store.revision, 0)
   assert.equal(store.canUndo, false)
   assert.equal(store.canRedo, false)
@@ -377,9 +371,9 @@ test('a change writes only what it touched, and counts the revision up', async (
     })
     return kv.writes.flat().filter((key) => !key.startsWith('step:'))
   }
-  assert.deepEqual(await write((doc) => addSpark(doc, 'a')), ['history', 'nextIds', 'rev', 'sparks'])
-  assert.deepEqual(await write((doc) => allocGroup(doc, toLabel('Work'))), ['groups', 'history', 'nextIds', 'rev'])
-  assert.deepEqual(await write((doc) => doc.groups.reverse()), ['groups', 'history', 'nextIds', 'rev'])
+  assert.deepEqual(await write((doc) => addSpark(doc, 'a')), ['history', 'nextIds', 'rev', 'sparks', 'views'])
+  assert.deepEqual(await write((doc) => allocView(doc, 'Work')), ['history', 'nextIds', 'rev', 'views'])
+  assert.deepEqual(await write((doc) => doc.views.reverse()), ['history', 'nextIds', 'rev', 'views'])
   assert.deepEqual(
     await write((doc) => {
       doc.prefs.columns = 6
@@ -406,11 +400,11 @@ test('only a commit at the expected revision goes through', async () => {
   assert.deepEqual(titles(store), ['a'])
 })
 
-test('undo returns to the group shown before, redo to the one shown after', async () => {
+test('undo returns to the view shown before, redo to the one shown after', async () => {
   const [store] = await tabs(1)
   assert.ok(store)
-  const work = GroupId.parse(5)
-  const home = GroupId.parse(0)
+  const work = ViewId.parse(5)
+  const home = ViewId.parse(0)
   await store.commit(
     (doc) => {
       addSpark(doc, 'a')
@@ -433,17 +427,17 @@ test('data from outside may go over the limits', async () => {
   assert.ok(store)
   await store.commit(
     (doc) => {
-      for (let count = 0; count <= LIMITS.sparksPerGroup; count++) addSpark(doc, 'x')
+      for (let count = 0; count <= LIMITS.sparks; count++) addSpark(doc, 'x')
       return undefined
     },
     { unchecked: true }
   )
-  assert.equal(store.doc.sparks.length, LIMITS.sparksPerGroup + 1)
+  assert.equal(store.doc.sparks.length, LIMITS.sparks + 1)
 })
 
 test('undo keeps exactly the limit of steps, the oldest one goes', async () => {
   const end = LIMITS.undo - 1
-  const kv = memory({ schema: 3, history: { first: 0, cursor: end, end }, 'step:0': {} })
+  const kv = memory({ schema: 4, history: { first: 0, cursor: end, end }, 'step:0': {} })
   const [store] = await tabs(1, kv)
   assert.ok(store)
   await add(store, 'a')
@@ -516,7 +510,7 @@ test('other tabs hear about changes, not about colors, and refresh tells whether
   assert.deepEqual(titles(a), ['x'])
 })
 
-test('import: stray sparks join the first group or are dropped without one, every image is kept, the old ones go', async () => {
+test('import: views keep their order by key, unknown keys drop out, every image is kept, the old ones go', async () => {
   const kv = memory()
   const [store] = await tabs(1, kv)
   assert.ok(store)
@@ -530,21 +524,43 @@ test('import: stray sparks join the first group or are dropped without one, ever
   )
   await store.saveColors(new Map([[old, '#000000']]))
   const many = 450
+  const rule = { all: false, include: [], exclude: [] }
+  const one = LabelName.parse('One')
   const first = await store.replaceAll({
-    groups: [
-      { key: 1, title: toLabel('One') },
-      { key: 2, title: toLabel('Two') }
+    views: [
+      { kind: 'normal', title: one, sort: 'manual', rule, order: [9, 2, 1] },
+      { kind: 'all', title: LabelName.parse('Everything'), sort: 'name', rule, order: [] },
+      { kind: 'normal', title: LabelName.parse('one'), sort: 'manual', rule, order: [] }
     ],
     sparks: [
-      { groupKey: 2, title: toLabel('two'), url: url('https://two.example/'), src: '' },
-      { groupKey: 9, title: toLabel('stray'), url: url('https://stray.example/'), src: '' },
-      ...Array.from({ length: many }, (_, index) => ({ groupKey: 1, title: toLabel(`p${index}`), url: url('https://p.example/'), src: `data:${index}` }))
+      { key: 1, title: toLabel('p'), url: url('https://p.example/'), src: '', labels: [one] },
+      { key: 2, title: toLabel('two'), url: url('https://two.example/'), src: '', labels: [one] },
+      ...Array.from({ length: many }, (_, index) => ({
+        key: 100 + index,
+        title: toLabel(`p${index}`),
+        url: url('https://p.example/'),
+        src: `data:${index}`,
+        labels: []
+      }))
     ],
     prefs: store.doc.prefs
   })
-  assert.equal(first, store.doc.groups[0]?.id)
-  assert.deepEqual(titles(store).slice(0, 2), ['stray', 'p0'])
-  assert.equal(titles(store).at(-1), 'two')
+  assert.deepEqual(
+    store.doc.views.map((view) => [view.kind, view.title, view.sort]),
+    [
+      ['unlabeled', 'Unlabeled', 'name'],
+      ['normal', 'One', 'manual'],
+      ['all', 'Everything', 'name']
+    ],
+    'the second "one" is the same view; Unlabeled comes back'
+  )
+  assert.equal(first, store.doc.views[2]?.id, 'All shows first')
+  const view = store.doc.views[1]
+  assert.ok(view)
+  assert.deepEqual(
+    view.order.map((id) => store.doc.sparks.find((spark) => spark.id === id)?.title),
+    ['two', 'p']
+  )
   const ids = store.doc.sparks.flatMap((spark) => (spark.thumb ? [spark.thumb] : []))
   assert.equal(ids.length, many)
   const images = await store.thumbs(ids)
@@ -552,23 +568,16 @@ test('import: stray sparks join the first group or are dropped without one, ever
   assert.deepEqual(kv.data.get('thumbIndex'), ids)
   assert.ok(!kv.data.has(thumbKey(old)))
   assert.ok(!kv.data.has('thumbColors'))
-  const groupless = await store.replaceAll({
-    groups: [],
-    sparks: [{ groupKey: 0, title: toLabel('a'), url: url('https://a.example/'), src: '' }],
-    prefs: store.doc.prefs
-  })
-  assert.deepEqual(titles(store), [])
-  assert.equal(groupless, store.doc.groups[0]?.id)
 })
 
-test('import refuses more than a group holds', async () => {
+test('import refuses more sparks than FireDial holds', async () => {
   const [store] = await tabs(1)
   assert.ok(store)
-  const spark = { groupKey: 0, title: toLabel('s'), url: url('https://s.example/'), src: '' }
+  const spark = { key: 0, title: toLabel('s'), url: url('https://s.example/'), src: '', labels: [] }
   await assert.rejects(
     store.replaceAll({
-      groups: [{ key: 0, title: toLabel('g') }],
-      sparks: Array.from({ length: LIMITS.sparksPerGroup + 1 }, () => spark),
+      views: [],
+      sparks: Array.from({ length: LIMITS.sparks + 1 }, () => spark),
       prefs: store.doc.prefs
     }),
     LimitError
@@ -600,4 +609,21 @@ test('collectGarbage with nothing to drop writes nothing, and steps it cannot re
   assert.equal(await store.collectGarbage(), 0)
   assert.equal(kv.writes.length, writes)
   assert.deepEqual(kv.data.get('thumbIndex'), [live])
+})
+
+test('an import is one revision on, for every tab, and shows All', async () => {
+  const kv = memory()
+  const [a, b] = await tabs(2, kv)
+  assert.ok(a && b)
+  const before = a.revision
+  const all = await a.replaceAll({
+    views: [],
+    sparks: [{ key: 1, title: toLabel('x'), url: url('https://x.example/'), src: '', labels: [] }],
+    prefs: a.doc.prefs
+  })
+  assert.equal(a.revision, before + 1)
+  assert.equal(all, a.doc.views.find((view) => view.kind === 'all')?.id)
+  assert.equal(await b.refresh(), true)
+  assert.equal(b.revision, before + 1)
+  assert.equal(b.doc.sparks.length, 1)
 })

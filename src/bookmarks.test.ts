@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { BookmarkSync, hasBookmarkFolder, parseMap, samePage } from './bookmarks.ts'
+import { BookmarkSync, hasBookmarkFolder, labelDataUrls, parseMap, readLabelData, readViewData, samePage, viewDataUrls } from './bookmarks.ts'
 import type { BookmarkApi, TreeNode } from './bookmarks.ts'
-import { allocGroup, allocSpark, LIMITS, SparkUrl, toLabel } from './model.ts'
-import type { Doc, GroupId, Spark } from './model.ts'
+import { addLabels, addTo, allocSpark, allocView, arrange, LabelName, LIMITS, moveInView, removeLabels, SparkId, SparkUrl, toLabel } from './model.ts'
+import type { Doc, Spark, View } from './model.ts'
 import { Store } from './store.ts'
 import type { KeyValue, Lock } from './store.ts'
 
@@ -100,8 +100,8 @@ class FakeBookmarks implements BookmarkApi {
     return found
   }
 
-  shape(): unknown {
-    return (this.folder().children ?? []).map((folder) => [folder.title, (folder.children ?? []).map((node) => node.title)])
+  shape(): string[] {
+    return (this.folder().children ?? []).map((node) => node.title)
   }
 }
 
@@ -150,19 +150,29 @@ async function setup(): Promise<Setup> {
   return { kv, store, api, sync, settle: () => sync.start() }
 }
 
-function spark(doc: Doc, title: string, groupId?: GroupId): Spark {
-  const target = groupId ?? doc.groups[0]?.id
-  if (target === undefined) throw new Error('no group')
-  return allocSpark(doc, { groupId: target, title: toLabel(title), url: SparkUrl.parse(`https://${title}.example`), thumb: null })
+const viewOf = (doc: Doc, title: string): View => {
+  const view = doc.views.find((each) => each.title === title)
+  if (!view) throw new Error(`no view ${title}`)
+  return view
 }
 
+function spark(doc: Doc, title: string, view?: string): Spark {
+  const made = allocSpark(doc, { title: toLabel(title), url: SparkUrl.parse(`https://${title}.example`), thumb: null })
+  if (view) addTo([made], viewOf(doc, view))
+  return made
+}
+
+const DATA = ['FireDial labels', 'FireDial views']
+
+// Home has a and b, Linux has c.
 async function seeded(): Promise<Setup> {
   const context = await setup()
   await context.store.commit((doc) => {
-    spark(doc, 'a')
-    spark(doc, 'b')
-    const linux = allocGroup(doc, toLabel('Linux'))
-    spark(doc, 'c', linux.id)
+    allocView(doc, 'Home')
+    allocView(doc, 'Linux')
+    spark(doc, 'a', 'Home')
+    spark(doc, 'b', 'Home')
+    spark(doc, 'c', 'Linux')
     return undefined
   })
   await context.settle()
@@ -170,6 +180,20 @@ async function seeded(): Promise<Setup> {
 }
 
 const titles = (store: Store): string[] => store.doc.sparks.map((item) => item.title)
+const labelsOf = (store: Store): string[][] => store.doc.sparks.map((item) => item.labels)
+
+// What a view shows on this device, in its order.
+const shownIn = (store: Store, title: string): string[] => arrange(store.doc, viewOf(store.doc, title)).map((item) => item.title)
+
+// Another device: its own storage, the same bookmarks through Firefox Sync.
+async function secondDevice(api: FakeBookmarks): Promise<Setup> {
+  const kv = memory()
+  const store = new Store(kv, noLock)
+  await store.load()
+  const sync = new BookmarkSync(store, kv, api)
+  await sync.start()
+  return { kv, store, api, sync, settle: () => sync.start() }
+}
 
 test("FireDial's folder counts only as a folder named FireDial in Other Bookmarks", async () => {
   const api = new FakeBookmarks()
@@ -181,12 +205,9 @@ test("FireDial's folder counts only as a folder named FireDial in Other Bookmark
   assert.equal(await hasBookmarkFolder(api), true)
 })
 
-test('first push builds the folder tree', async () => {
+test("first push puts every spark in FireDial's folder, in All's order, then the data", async () => {
   const { api } = await seeded()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b']],
-    ['Linux', ['c']]
-  ])
+  assert.deepEqual(api.shape(), ['a', 'b', 'c', ...DATA])
 })
 
 test('a synced state causes no writes, even with normalized URLs', async () => {
@@ -204,235 +225,162 @@ test('a synced state causes no writes, even with normalized URLs', async () => {
 test('changes in FireDial reach the bookmarks', async () => {
   const { store, api, settle } = await seeded()
   await store.commit((doc) => {
+    spark(doc, 'd', 'Linux')
     const [first] = doc.sparks
     if (first) first.title = toLabel('renamed')
     doc.sparks = doc.sparks.filter((item) => item.title !== 'b')
-    const group = doc.groups[1]
-    if (group) group.title = toLabel('Penguins')
     return undefined
   })
   await settle()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['renamed']],
-    ['Penguins', ['c']]
-  ])
+  assert.deepEqual(api.shape(), ['renamed', 'c', 'd', ...DATA])
 })
 
-test('moving and reordering in FireDial reaches the bookmarks', async () => {
+test('reordering All in FireDial reaches the bookmarks, other orders stay in the data', async () => {
   const { store, api, settle } = await seeded()
   await store.commit((doc) => {
-    doc.sparks.reverse()
-    doc.groups.reverse()
+    const all = viewOf(doc, 'All')
+    moveInView(doc, all, [SparkId.parse(2)], SparkId.parse(0), false)
+    const home = viewOf(doc, 'Home')
+    moveInView(doc, home, [SparkId.parse(1)], SparkId.parse(0), false)
     return undefined
   })
   await settle()
-  assert.deepEqual(api.shape(), [
-    ['Linux', ['c']],
-    ['Home', ['b', 'a']]
-  ])
-  const linux = store.doc.groups[0]
-  await store.commit((doc) => {
-    const target = doc.sparks.find((item) => item.title === 'a')
-    if (target && linux) target.groupId = linux.id
-    return undefined
-  })
-  await settle()
-  assert.deepEqual(api.shape(), [
-    ['Linux', ['c', 'a']],
-    ['Home', ['b']]
-  ])
-})
-
-test('removing a group removes its folder', async () => {
-  const { store, api, settle } = await seeded()
-  await store.commit((doc) => {
-    doc.groups = doc.groups.filter((group) => group.title !== 'Linux')
-    doc.sparks = doc.sparks.filter((item) => item.title !== 'c')
-    return undefined
-  })
-  await settle()
-  assert.deepEqual(api.shape(), [['Home', ['a', 'b']]])
+  assert.deepEqual(api.shape(), ['c', 'a', 'b', ...DATA])
+  const second = await secondDevice(api)
+  assert.deepEqual(titles(second.store), ['c', 'a', 'b'])
+  assert.deepEqual(shownIn(second.store, 'Home'), ['b', 'a'])
 })
 
 test('edits in Firefox reach FireDial', async () => {
   const { store, api, settle } = await seeded()
-  const home = api.child('Home')
-  await api.update(api.child('a', home).id, { title: 'A!', url: 'https://other.example/' })
-  await api.update(api.child('Linux').id, { title: 'Penguins' })
+  api.child('a').title = 'edited'
+  api.child('b').url = 'https://moved.example/'
   await settle()
-  assert.deepEqual(titles(store), ['A!', 'b', 'c'])
-  assert.equal(store.doc.sparks[0]?.url, 'https://other.example/')
-  assert.equal(store.doc.groups[1]?.title, 'Penguins')
+  assert.deepEqual(titles(store), ['edited', 'b', 'c'])
+  assert.equal(store.doc.sparks[1]?.url, 'https://moved.example/')
 })
 
-test('new bookmarks and folders in Firefox become sparks and groups', async () => {
+test('a new bookmark in Firefox becomes a spark in Unlabeled', async () => {
   const { store, api, settle } = await seeded()
-  const made = await api.create({ parentId: api.folder().id, title: 'Work' })
-  await api.create({ parentId: made.id, title: 'mail', url: 'https://mail.example/' })
-  await api.create({ parentId: api.child('Home').id, title: 'd', url: 'https://d.example/' })
+  await api.create({ parentId: api.folder().id, title: 'new', url: 'https://new.example/' })
   await settle()
-  assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Home', 'Linux', 'Work']
-  )
-  assert.deepEqual(titles(store), ['a', 'b', 'd', 'c', 'mail'])
+  assert.deepEqual(titles(store), ['a', 'b', 'c', 'new'])
+  assert.deepEqual(shownIn(store, 'Unlabeled'), ['new'])
+  assert.equal(store.doc.sparks[3]?.thumb, null)
 })
 
-test('moves and reorders in Firefox reach FireDial', async () => {
+test('a reorder in Firefox is the new order of All', async () => {
   const { store, api, settle } = await seeded()
-  const home = api.child('Home')
-  await api.move(api.child('b', home).id, { parentId: home.id, index: 0 })
-  await api.move(api.child('c', api.child('Linux')).id, { parentId: home.id, index: 1 })
-  await api.move(api.child('Linux').id, { parentId: api.folder().id, index: 0 })
+  await api.move(api.child('c').id, { parentId: api.folder().id, index: 0 })
   await settle()
-  assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Linux', 'Home']
-  )
-  assert.deepEqual(titles(store), ['b', 'c', 'a'])
+  assert.deepEqual(titles(store), ['c', 'a', 'b'])
+  assert.deepEqual(shownIn(store, 'Home'), ['a', 'b'], 'a view keeps its own order')
 })
 
 test('a deletion in Firefox can be undone, and the bookmark comes back', async () => {
   const { store, api, settle } = await seeded()
-  await api.remove(api.child('a', api.child('Home')).id)
+  await api.remove(api.child('b').id)
   await settle()
-  assert.deepEqual(titles(store), ['b', 'c'])
+  assert.deepEqual(titles(store), ['a', 'c'])
   await store.undo()
+  await settle()
   assert.deepEqual(titles(store), ['a', 'b', 'c'])
-  await settle()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b']],
-    ['Linux', ['c']]
-  ])
-})
-
-test('deleting a group folder in Firefox removes group and sparks', async () => {
-  const { store, api, settle } = await seeded()
-  await api.removeTree(api.child('Linux').id)
-  await settle()
-  assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Home']
-  )
-  assert.deepEqual(titles(store), ['a', 'b'])
-})
-
-test('undoing a removal in FireDial makes a new bookmark', async () => {
-  const { store, api, settle } = await seeded()
-  await store.commit((doc) => {
-    doc.sparks = doc.sparks.filter((item) => item.title !== 'a')
-    return undefined
-  })
-  await settle()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['b']],
-    ['Linux', ['c']]
-  ])
-  await store.undo()
-  await settle()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b']],
-    ['Linux', ['c']]
-  ])
+  assert.deepEqual(api.shape(), ['a', 'b', 'c', ...DATA])
+  assert.deepEqual(shownIn(store, 'Home'), ['a', 'b'])
 })
 
 test('deleting the whole FireDial folder wipes nothing: it comes back', async () => {
   const { store, api, settle } = await seeded()
-  await api.removeTree(api.folder().id)
+  await api.remove(api.folder().id)
   await settle()
   assert.deepEqual(titles(store), ['a', 'b', 'c'])
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b']],
-    ['Linux', ['c']]
-  ])
-})
-
-test('a bookmark directly in the FireDial folder joins the first group', async () => {
-  const { store, api, settle } = await seeded()
-  await api.create({ parentId: api.folder().id, title: 'loose', url: 'https://loose.example/' })
-  await settle()
-  await settle()
-  assert.deepEqual(titles(store), ['a', 'b', 'loose', 'c'])
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b', 'loose']],
-    ['Linux', ['c']]
-  ])
-})
-
-test('an import with the same group names replaces the bookmarks cleanly', async () => {
-  const { store, api, settle } = await seeded()
-  await store.replaceAll({
-    groups: [{ key: 1, title: toLabel('Home') }],
-    sparks: [{ groupKey: 1, title: toLabel('new'), url: SparkUrl.parse('https://new.example/'), src: '' }],
-    prefs: store.doc.prefs
-  })
-  await settle()
-  assert.deepEqual(api.shape(), [['Home', ['new']]])
-  assert.deepEqual(titles(store), ['new'])
+  assert.deepEqual(api.shape(), ['a', 'b', 'c', ...DATA])
 })
 
 test('a spark the bookmark API refuses stays in FireDial, the rest syncs', async () => {
-  const { store, api, settle } = await setup()
-  await store.commit((doc) => {
+  const context = await setup()
+  await context.store.commit((doc) => {
     spark(doc, 'a')
-    allocSpark(doc, { groupId: doc.groups[0]?.id ?? allocGroup(doc, toLabel('x')).id, title: toLabel('refused'), url: SparkUrl.parse('bad'), thumb: null })
+    allocSpark(doc, { title: toLabel('refused'), url: SparkUrl.parse('https://r.example'), thumb: null })
     spark(doc, 'b')
     return undefined
   })
-  await settle()
-  await settle()
-  assert.deepEqual(titles(store), ['a', 'refused', 'b'])
-  assert.deepEqual(api.shape(), [['Home', ['a', 'b']]])
+  await context.settle()
+  assert.deepEqual(titles(context.store), ['a', 'refused', 'b'])
+  assert.deepEqual(context.api.shape(), ['a', 'b', 'FireDial views'])
 })
 
 test('an interrupted first sync adopts what it made instead of doubling it', async () => {
-  const first = await seeded()
-  const kv = memory()
-  const store = new Store(kv, noLock)
-  await store.load()
-  await store.commit((doc) => {
-    spark(doc, 'a')
-    spark(doc, 'b')
-    const linux = allocGroup(doc, toLabel('Linux'))
-    spark(doc, 'c', linux.id)
-    return undefined
-  })
-  await new BookmarkSync(store, kv, first.api).start() // same bookmarks, no map
-  assert.deepEqual(first.api.shape(), [
-    ['Home', ['a', 'b']],
-    ['Linux', ['c']]
-  ])
-})
-
-test('a fresh install picks up an existing FireDial folder', async () => {
-  const { api } = await seeded()
-  const kv = memory()
-  const store = new Store(kv, noLock)
-  await store.load()
-  await new BookmarkSync(store, kv, api).start()
-  assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Home', 'Linux']
-  )
+  const { store, api, kv, settle } = await seeded()
+  kv.data.delete('bookmarkMap')
+  kv.data.delete('syncedRev')
+  await settle()
+  assert.deepEqual(api.shape(), ['a', 'b', 'c', ...DATA])
   assert.deepEqual(titles(store), ['a', 'b', 'c'])
 })
 
-test('unknown items in the folder survive a push', async () => {
+test('a fresh install picks up an existing FireDial folder: sparks, labels, views, rules and orders', async () => {
+  const first = await seeded()
+  await first.store.commit((doc) => {
+    const home = viewOf(doc, 'Home')
+    home.sort = 'name'
+    moveInView(doc, viewOf(doc, 'Linux'), [], null, false)
+    const morning = allocView(doc, 'Morning')
+    morning.rule = { all: false, include: [LabelName.parse('linux')], exclude: [LabelName.parse('Home')] }
+    addLabels(doc.sparks.slice(0, 1), [LabelName.parse('Trip to Rome')])
+    return undefined
+  })
+  await first.settle()
+  const second = await secondDevice(first.api)
+  const shape = (store: Store): unknown => store.doc.views.map(({ kind, title, sort, rule }) => [kind, title, sort, rule])
+  assert.deepEqual(shape(second.store), shape(first.store))
+  assert.deepEqual(titles(second.store), ['a', 'b', 'c'])
+  assert.deepEqual(labelsOf(second.store), labelsOf(first.store))
+  assert.deepEqual(shownIn(second.store, 'Morning'), ['c'])
+})
+
+test('views changed on one device reach the other, keeping their ids where they match', async () => {
+  const first = await seeded()
+  const second = await secondDevice(first.api)
+  const linux = viewOf(second.store.doc, 'Linux').id
+  await first.store.commit((doc) => {
+    allocView(doc, 'Fresh')
+    doc.views = doc.views.filter((view) => view.title !== 'Home')
+    viewOf(doc, 'Linux').sort = 'date'
+    return undefined
+  })
+  await first.settle()
+  await second.settle()
+  assert.deepEqual(
+    second.store.doc.views.map((view) => view.title),
+    ['All', 'Unlabeled', 'Linux', 'Fresh']
+  )
+  assert.equal(viewOf(second.store.doc, 'Linux').id, linux)
+  assert.equal(viewOf(second.store.doc, 'Linux').sort, 'date')
+  assert.deepEqual(labelsOf(second.store), [['Home'], ['Home'], ['Linux']], 'labels stay with a deleted view')
+})
+
+test('folders and other items in the FireDial folder are left alone', async () => {
   const { store, api, settle } = await seeded()
-  const home = api.child('Home')
-  home.children?.push({ id: 'sep', title: '', type: 'separator' })
+  await api.create({ parentId: api.folder().id, title: 'Old group' })
+  await api.create({ parentId: api.child('Old group').id, title: 'inside', url: 'https://inside.example/' })
+  api.folder().children?.push({ id: 'sep', title: '', type: 'separator' })
   await store.commit((doc) => {
     spark(doc, 'd')
     return undefined
   })
   await settle()
-  assert.ok(api.child('Home').children?.some((node) => node.id === 'sep'))
+  assert.deepEqual(titles(store), ['a', 'b', 'c', 'd'])
+  assert.ok(api.folder().children?.some((node) => node.id === 'sep'))
+  assert.deepEqual(
+    api.child('Old group').children?.map((node) => node.title),
+    ['inside']
+  )
 })
 
-test('the map survives storage', () => {
+test('the map survives storage, and a broken one reads as empty', () => {
   const map = parseMap({
     root: 'r',
-    groups: [[1, 'g']],
     sparks: [
       [2, 's'],
       ['bad', 's']
@@ -441,6 +389,9 @@ test('the map survives storage', () => {
   assert.equal(map.root, 'r')
   assert.equal(map.sparks.size, 1)
   assert.equal(parseMap(null).root, null)
+  const broken = parseMap({ root: 'r', sparks: 'x' })
+  assert.equal(broken.root, 'r')
+  assert.equal(broken.sparks.size, 0)
 })
 
 test('a page counts as the same one after a redirect to www or https', () => {
@@ -458,13 +409,6 @@ test('a page is only the same one after a redirect, not with any www or http in 
   assert.equal(samePage('https+x://example.com/', 'https://example.com/'), false)
   assert.equal(samePage('not a url', 'not a url'), true)
   assert.equal(samePage('not a url', 'other'), false)
-})
-
-test('a broken map in storage reads as empty', () => {
-  const map = parseMap({ root: 'r', groups: 'x', sparks: 'x' })
-  assert.equal(map.root, 'r')
-  assert.equal(map.groups.size, 0)
-  assert.equal(map.sparks.size, 0)
 })
 
 const editCount = async (context: Setup, edit: (doc: Doc) => void): Promise<number> => {
@@ -488,157 +432,40 @@ test('a push writes only what changed', async () => {
   )
   assert.equal(
     await editCount(context, (doc) => {
-      const group = doc.groups[1]
-      if (group) group.title = toLabel('Penguins')
+      viewOf(doc, 'Home').sort = 'date'
     }),
-    1
+    1,
+    'the views bookmark only'
   )
   assert.equal(
     await editCount(context, (doc) => {
-      doc.sparks = doc.sparks.filter((item) => item.title !== 'b')
-    }),
-    1
-  )
-  assert.equal(
-    await editCount(context, (doc) => {
-      const penguins = doc.groups.find((group) => group.title === 'Penguins')
-      doc.groups = doc.groups.filter((group) => group !== penguins)
-      doc.sparks = doc.sparks.filter((item) => item.groupId !== penguins?.id)
-    }),
-    2 // the bookmark, then its folder
-  )
-  assert.deepEqual(context.api.shape(), [['Home', ['renamed']]])
-})
-
-test('reordering sparks in FireDial moves as few bookmarks as it takes', async () => {
-  const context = await setup()
-  await context.store.commit((doc) => {
-    for (const title of ['a', 'b', 'c', 'd']) spark(doc, title)
-    const linux = allocGroup(doc, toLabel('Linux'))
-    spark(doc, 'x', linux.id)
-    spark(doc, 'y', linux.id)
-    return undefined
-  })
-  await context.settle()
-  const moves = await editCount(context, (doc) => {
-    doc.sparks = [...doc.sparks.slice(0, 4).reverse(), ...doc.sparks.slice(4).reverse()]
-  })
-  assert.deepEqual(context.api.shape(), [
-    ['Home', ['d', 'c', 'b', 'a']],
-    ['Linux', ['y', 'x']]
-  ])
-  assert.equal(moves, 4)
-})
-
-test('a removal that Firefox already made is not made again', async () => {
-  const context = await seeded()
-  const { api } = context
-  const home = api.child('Home')
-  home.children = home.children?.filter((node) => node.title !== 'b')
-  api.folder().children = api.folder().children?.filter((node) => node.title !== 'Linux')
-  assert.equal(
-    await editCount(context, (doc) => {
-      doc.sparks = doc.sparks.filter((item) => item.title === 'a')
-      doc.groups = doc.groups.filter((group) => group.title !== 'Linux')
+      doc.prefs.columns = 7
     }),
     0
   )
-  assert.deepEqual(api.shape(), [['Home', ['a']]])
 })
 
-test('a group whose folder Firefox refuses stays in FireDial, the other groups sync', async () => {
-  const context = await setup()
-  await context.store.commit((doc) => {
-    const refused = allocGroup(doc, toLabel('refused'))
-    spark(doc, 'lost', refused.id)
-    const linux = allocGroup(doc, toLabel('Linux'))
-    spark(doc, 'c', linux.id)
-    return undefined
+test('reordering sparks in FireDial moves as few bookmarks as it takes', async () => {
+  const context = await seeded()
+  const moves = await editCount(context, (doc) => {
+    moveInView(doc, viewOf(doc, 'All'), [SparkId.parse(2)], SparkId.parse(0), false)
   })
-  await context.settle()
-  assert.deepEqual(context.api.shape(), [
-    ['Home', []],
-    ['Linux', ['c']]
-  ])
-  assert.deepEqual(titles(context.store), ['lost', 'c'])
+  assert.equal(moves, 1 + 1, 'one move, and the views bookmark')
+  assert.deepEqual(context.api.shape(), ['c', 'a', 'b', ...DATA])
 })
 
-test('a push adopts only folders and bookmarks that match, one each', async () => {
-  const first = await seeded()
-  const { api } = first
-  await api.create({ parentId: api.folder().id, title: 'Mine' })
-  const kv = memory()
-  const store = new Store(kv, noLock)
-  await store.load()
+test('a removal that Firefox already made is not made again', async () => {
+  const { store, api, kv, settle } = await seeded()
+  await api.remove(api.child('b').id)
   await store.commit((doc) => {
-    spark(doc, 'a')
-    spark(doc, 'a')
-    spark(doc, 'd')
+    doc.sparks = doc.sparks.filter((item) => item.title !== 'b')
     return undefined
   })
-  await new BookmarkSync(store, kv, api).start()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'a', 'd', 'b']],
-    ['Linux', ['c']],
-    ['Mine', []]
-  ])
-  assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Home', 'Linux', 'Mine']
-  )
-  const map = parseMap(kv.data.get('bookmarkMap'))
-  assert.equal(map.sparks.size, store.doc.sparks.length)
-})
-
-test('a fresh install finds the FireDial folder among other things of that name', async () => {
-  const { api } = await seeded()
-  const folder = api.folder()
-  api.root.children = [
-    { id: 'mark', title: 'FireDial', type: 'bookmark', url: 'https://firedial.example/' },
-    { id: 'other', title: 'Other', type: 'folder', children: [] },
-    folder
-  ]
-  const kv = memory()
-  const store = new Store(kv, noLock)
-  await store.load()
-  await new BookmarkSync(store, kv, api).start()
-  assert.equal(parseMap(kv.data.get('bookmarkMap')).root, folder.id)
-  assert.deepEqual(titles(store), ['a', 'b', 'c'])
-})
-
-test('separators and bookmarks without an address are no sparks, a folder without children is a group', async () => {
-  const { store, api, settle } = await seeded()
-  api.folder().children?.push({ id: 'sep', title: '', type: 'separator' }, { id: 'bare', title: 'Bare', type: 'folder' })
-  api
-    .child('Home')
-    .children?.push({ id: 'sep2', title: 'x', type: 'separator', url: 'https://sep.example/' }, { id: 'nourl', title: 'nourl', type: 'bookmark', url: null })
+  const writes = api.writes
   await settle()
-  assert.deepEqual(
-    store.doc.groups.map((group) => group.title),
-    ['Home', 'Linux', 'Bare']
-  )
-  assert.deepEqual(titles(store), ['a', 'b', 'c'])
-})
-
-test('a bookmark that lost its address keeps its spark', async () => {
-  const { store, api, settle } = await seeded()
-  api.child('a', api.child('Home')).url = null
-  await settle()
-  assert.deepEqual(titles(store), ['a', 'b', 'c'])
-})
-
-test('a bookmark from Firefox becomes a spark without an image, and the map follows deletions', async () => {
-  const { kv, store, api, settle } = await seeded()
-  await api.create({ parentId: api.child('Home').id, title: 'new', url: 'https://new.example/' })
-  await settle()
-  const created = store.doc.sparks.find((item) => item.title === 'new')
-  assert.deepEqual(created && { title: created.title, url: created.url, thumb: created.thumb }, { title: 'new', url: 'https://new.example/', thumb: null })
-  await api.remove(api.child('new', api.child('Home')).id)
-  await api.removeTree(api.child('Linux').id)
-  await settle()
+  assert.equal(api.writes - writes, 2, 'the label and views bookmarks only')
   const map = parseMap(kv.data.get('bookmarkMap'))
   assert.equal(map.sparks.size, 2)
-  assert.equal(map.groups.size, 1)
   assert.equal(kv.data.get('syncedRev'), store.revision)
 })
 
@@ -653,38 +480,22 @@ test('the map is saved along the way of a long push', async () => {
   assert.equal(context.kv.sets.filter((keys) => keys.join() === 'bookmarkMap').length, 2)
 })
 
-test('a loose bookmark goes into its folder in the same round', async () => {
-  const { store, api, sync } = await seeded()
-  await api.create({ parentId: api.folder().id, title: 'loose', url: 'https://loose.example/' })
-  await sync.start()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b', 'loose']],
-    ['Linux', ['c']]
-  ])
-  assert.deepEqual(titles(store), ['a', 'b', 'loose', 'c'])
-})
-
 test('a pull takes everything from Firefox, even over the limits', async () => {
   const { store, api, settle } = await seeded()
-  const home = api.child('Home')
-  for (let index = 0; index < LIMITS.sparksPerGroup; index++)
-    home.children?.push({ id: `many${index}`, title: 'm', type: 'bookmark', url: 'https://m.example/' })
+  const folder = api.folder()
+  for (let index = 0; index < LIMITS.sparks; index++) folder.children?.push({ id: `many${index}`, title: 'm', type: 'bookmark', url: 'https://m.example/' })
   await settle()
-  assert.equal(store.doc.sparks.length, LIMITS.sparksPerGroup + 3)
+  assert.equal(store.doc.sparks.length, LIMITS.sparks + 3)
 })
 
 test('jobs asked for at once run one after the other', async () => {
   const context = await setup()
   await context.store.commit((doc) => {
     spark(doc, 'a')
-    allocGroup(doc, toLabel('Linux'))
     return undefined
   })
   await Promise.all([context.sync.requestPush(), context.sync.requestPush(), context.sync.start()])
-  assert.deepEqual(context.api.shape(), [
-    ['Home', ['a']],
-    ['Linux', []]
-  ])
+  assert.deepEqual(context.api.shape(), ['a', 'FireDial views'])
 })
 
 test('a failed job is logged and the next one runs', async (t) => {
@@ -697,10 +508,7 @@ test('a failed job is logged and the next one runs', async (t) => {
   assert.equal(errors.mock.calls[0]?.arguments[0], 'FireDial bookmark sync:')
   getChildren.mock.restore()
   await context.settle()
-  assert.deepEqual(context.api.shape(), [
-    ['Home', ['a', 'b']],
-    ['Linux', ['c']]
-  ])
+  assert.deepEqual(context.api.shape(), ['a', 'b', 'c', ...DATA])
 })
 
 test('a pull waits for Firefox to calm down, and pushes what FireDial changed first', async (t) => {
@@ -714,31 +522,150 @@ test('a pull waits for Firefox to calm down, and pushes what FireDial changed fi
     return undefined
   })
   await sync.requestPush()
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b', 'd']],
-    ['Linux', ['c']]
-  ])
-  api.child('c', api.child('Linux')).title = 'renamed'
+  assert.deepEqual(api.shape(), ['a', 'b', 'c', 'd', ...DATA])
+  api.child('c').title = 'renamed'
   sync.requestPull()
   t.mock.timers.tick(299)
   sync.requestPull()
   t.mock.timers.tick(299)
   await settled()
-  assert.deepEqual(titles(store), ['a', 'b', 'd', 'c'])
+  assert.deepEqual(titles(store), ['a', 'b', 'c', 'd'])
   t.mock.timers.tick(1)
   await settled()
-  assert.deepEqual(titles(store), ['a', 'b', 'd', 'renamed'])
+  assert.deepEqual(titles(store), ['a', 'b', 'renamed', 'd'])
   await store.commit((doc) => {
     spark(doc, 'e')
     return undefined
   })
-  await api.create({ parentId: api.child('Linux').id, title: 'new', url: 'https://new.example/' })
+  await api.create({ parentId: api.folder().id, title: 'new', url: 'https://new.example/' })
   sync.requestPull()
   t.mock.timers.tick(300)
   await settled()
-  assert.deepEqual(titles(store), ['a', 'b', 'd', 'e', 'renamed', 'new'])
-  assert.deepEqual(api.shape(), [
-    ['Home', ['a', 'b', 'd', 'e']],
-    ['Linux', ['renamed', 'new']]
-  ])
+  assert.deepEqual(titles(store), ['a', 'b', 'renamed', 'd', 'e', 'new'])
+})
+
+const labelSparks = (titlesToLabel: readonly string[], label: string) => (doc: Doc) => {
+  addLabels(
+    doc.sparks.filter((item) => titlesToLabel.includes(item.title)),
+    [LabelName.parse(label)]
+  )
+  return undefined
+}
+
+test('without labels there is no label bookmark', async () => {
+  const context = await setup()
+  await context.store.commit((doc) => {
+    spark(doc, 'a')
+    return undefined
+  })
+  await context.settle()
+  assert.deepEqual(context.api.shape(), ['a', 'FireDial views'])
+})
+
+test('a label change on one device reaches the other, removals too', async () => {
+  const first = await seeded()
+  await first.store.commit(labelSparks(['a'], 'web'))
+  await first.settle()
+  const second = await secondDevice(first.api)
+  assert.deepEqual(labelsOf(second.store), [['Home', 'web'], ['Home'], ['Linux']])
+  await second.store.commit((doc) => {
+    removeLabels(doc.sparks, ['web'])
+    return labelSparks(['b'], 'news')(doc)
+  })
+  await second.settle()
+  await first.settle()
+  assert.deepEqual(labelsOf(first.store), [['Home'], ['Home', 'news'], ['Linux']])
+  await first.store.commit((doc) => {
+    removeLabels(doc.sparks, ['news', 'home', 'linux'])
+    return undefined
+  })
+  await first.settle()
+  await second.settle()
+  assert.deepEqual(labelsOf(second.store), [[], [], []], 'the last label gone is gone there too')
+})
+
+test('a synced state with labels and views causes no writes', async () => {
+  const { store, api, settle } = await seeded()
+  await store.commit(labelSparks(['a', 'b'], 'docs'))
+  await settle()
+  const writes = api.writes
+  await settle()
+  await settle()
+  assert.equal(api.writes, writes)
+})
+
+test('broken data bookmarks leave labels and views alone', async () => {
+  const { store, api, settle } = await seeded()
+  api.child('FireDial labels').url = 'https://firedial.invalid/labels/1-2#%7B%7D'
+  api.child('FireDial views').url = 'https://firedial.invalid/views/1-1#%7Bbroken'
+  await api.create({ parentId: api.folder().id, title: 'new', url: 'https://new.example/' })
+  await settle()
+  assert.deepEqual(labelsOf(store), [['Home'], ['Home'], ['Linux'], []])
+  assert.deepEqual(
+    store.doc.views.map((view) => view.title),
+    ['All', 'Unlabeled', 'Home', 'Linux']
+  )
+})
+
+test('label data longer than one address is split and joined again', () => {
+  const labels: Record<string, LabelName[]> = {}
+  for (let index = 0; index < 3000; index += 1) labels[`bookmark-${index}`] = [LabelName.parse(`Label number ${index}`)]
+  const urls = labelDataUrls(labels)
+  assert.ok(urls.length > 1)
+  for (const url of urls) assert.ok(url.length < 65_000, String(url.length))
+  const nodes: TreeNode[] = urls.map((url, index) => ({ id: `n${index}`, title: 'FireDial labels', type: 'bookmark', url }))
+  assert.deepEqual(readLabelData([...nodes].reverse()), new Map(Object.entries(labels)), 'in any order')
+  assert.equal(readLabelData(nodes.slice(1)), null, 'a part missing')
+  assert.equal(readLabelData([]), null)
+  assert.equal(readLabelData([{ id: 'x', title: '', type: 'bookmark', url: 'https://firedial.invalid/labels/1-1#%7Bbroken' }]), null)
+})
+
+test('label data keeps only valid labels, each once', () => {
+  const [url] = labelDataUrls({ b1: ['docs', 'Docs', 'Two Words', '', 'a,b'].map((text) => LabelName.parse(text)) })
+  assert.ok(url)
+  assert.deepEqual(readLabelData([{ id: 'x', title: '', type: 'bookmark', url }]), new Map([['b1', ['docs', 'Two Words']]]))
+})
+
+test('view data reads back, and broken views are left out', () => {
+  const rule = { all: false, include: [LabelName.parse('a')], exclude: [] }
+  const urls = viewDataUrls([{ kind: 'normal', title: LabelName.parse('Work'), sort: 'name', rule, order: ['b1', 'b2'] }])
+  const nodes: TreeNode[] = urls.map((url, index) => ({ id: `v${index}`, title: 'FireDial views', type: 'bookmark', url }))
+  assert.deepEqual(readViewData(nodes), [{ kind: 'normal', title: 'Work', sort: 'name', rule, order: ['b1', 'b2'] }])
+  assert.equal(readViewData([]), null)
+})
+
+test('data bookmarks: ten parts and more read back; a stray, mixed or unreadable part spoils them', () => {
+  const labels: Record<string, LabelName[]> = {}
+  for (let index = 0; index < 16_000; index += 1) labels[`bookmark-${index}`] = [LabelName.parse(`Label number ${index}`)]
+  const urls = labelDataUrls(labels)
+  assert.ok(urls.length >= 10, String(urls.length))
+  const node = (url: string, index = 0): TreeNode => ({ id: `n${index}`, title: 'FireDial labels', type: 'bookmark', url })
+  const nodes = urls.map(node)
+  assert.equal(readLabelData(nodes)?.size, 16_000)
+  const prefix = 'https://firedial.invalid/labels/'
+  assert.equal(readLabelData([...nodes, node(`${prefix}x1-1#%7B%7D`)]), null, 'a part with junk before its number')
+  assert.equal(readLabelData([node(`${prefix}1-1#%7B%7D`), node(`${prefix}2-2#`)]), null, 'parts that disagree on how many there are')
+  assert.equal(readLabelData([node(`${prefix}1-1#%E0%A4%A`)]), null, 'text that does not decode')
+  assert.deepEqual(
+    readLabelData([node(`${prefix}1-1#${encodeURIComponent(JSON.stringify({ b1: 'docs', b2: ['Docs'] }))}`)]),
+    new Map([
+      ['b1', []],
+      ['b2', ['Docs']]
+    ]),
+    'labels that are no list count as none'
+  )
+  const [view] = viewDataUrls([])
+  assert.ok(view)
+  assert.deepEqual(
+    readViewData([
+      {
+        id: 'v',
+        title: '',
+        type: 'bookmark',
+        url: view.replace(/#.*/, `#${encodeURIComponent(JSON.stringify([{ kind: 'normal', title: 'W', order: 'b1' }]))}`)
+      }
+    ])?.[0]?.order,
+    [],
+    'an order that is no list is empty'
+  )
 })

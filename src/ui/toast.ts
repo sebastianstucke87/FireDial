@@ -3,13 +3,13 @@
 
 import { textOn } from '../color.ts'
 import { accentOf } from '../model.ts'
-import type { GroupId, Prefs, SparkId } from '../model.ts'
+import type { ViewId, Prefs, SparkId } from '../model.ts'
 
 const TOAST_TIME = 6000 // ms
 
 // The spark a click on the notification leads to.
 export interface Reveal {
-  groupId: GroupId
+  viewId: ViewId
   sparkId: SparkId
 }
 
