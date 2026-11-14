@@ -28,7 +28,7 @@ English
 
 ### Store icon
 
-`browsers/chrome/icons/icon-128.png`
+`cws-icon.png` (orange; the icons inside Chrome are grey)
 
 ### Screenshots
 
