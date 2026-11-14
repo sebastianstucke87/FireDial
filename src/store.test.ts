@@ -6,6 +6,9 @@ import type { Doc, Spark } from './model.ts'
 import { Store, thumbKey } from './store.ts'
 import type { KeyValue, Lock } from './store.ts'
 
+// Small limits: the limit tests then build 1,000 sparks, not 100,000, which matters for mutation testing.
+Object.assign(LIMITS, { views: 20, sparks: 1000 })
+
 // Storage with the semantics Firefox has: values cloned on the way in and out, one change event per write.
 function memory(initial: Record<string, unknown> = {}): KeyValue & { data: Map<string, unknown> } {
   const data = new Map(Object.entries(initial))

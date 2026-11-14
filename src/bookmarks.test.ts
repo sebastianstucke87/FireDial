@@ -8,6 +8,9 @@ import type { Doc, Spark, View } from './model.ts'
 import { Store } from './store.ts'
 import type { KeyValue, Lock } from './store.ts'
 
+// Small limits: the limit tests then build 1,000 sparks, not 100,000, which matters for mutation testing.
+Object.assign(LIMITS, { views: 20, sparks: 1000 })
+
 // Firefox's bookmarks as far as FireDial cares: normalized URLs, stable ids, failures on bad URLs.
 class FakeBookmarks implements BookmarkApi {
   private nextId = 1
