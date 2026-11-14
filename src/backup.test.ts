@@ -5,6 +5,9 @@ import { backupName, exportParts, importSummary, parseBackup, readBackup } from 
 import { addTo, allocView, emptyDoc, LabelName, LimitError, LIMITS, SparkId, ThumbId, toLabel, toSparkUrl } from './model.ts'
 import type { Doc } from './model.ts'
 
+// Small limits: the limit tests then build 1,000 sparks, not 100,000, which matters for mutation testing.
+Object.assign(LIMITS, { views: 20, sparks: 1000 })
+
 function sampleDoc(): Doc {
   const doc = emptyDoc()
   const url = toSparkUrl('https://a.example/')

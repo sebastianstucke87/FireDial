@@ -33,6 +33,9 @@ import {
 } from './model.ts'
 import type { Doc, LabelName } from './model.ts'
 
+// Small limits: the limit tests then build 1,000 sparks, not 100,000, which matters for mutation testing.
+Object.assign(LIMITS, { views: 20, sparks: 1000 })
+
 test('the search box opens what looks like an address', () => {
   assert.equal(searchUrl('https://a.example/x?y=1'), 'https://a.example/x?y=1')
   assert.equal(searchUrl('about:debugging#/runtime/this-firefox'), 'about:debugging#/runtime/this-firefox')
