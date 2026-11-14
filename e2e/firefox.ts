@@ -22,14 +22,21 @@ export function startFirefox(prefs: Record<string, string | number | boolean> = 
 }
 
 // Empty, as the tests expect: a FireDial bookmark folder made first keeps the defaults out, the
-// way one brought by Firefox Sync does. defaults: true installs FireDial as a fresh install gets it.
+// way one brought by Firefox Sync does. Made once Firefox has put its own bookmarks in the new
+// profile: that import replaces all bookmarks, a folder made before it included.
+// defaults: true installs FireDial as a fresh install gets it.
 export async function installFireDial(driver: firefox.Driver, { defaults = false } = {}): Promise<string> {
   if (!defaults) {
     await driver.setContext(firefox.Context.CHROME)
     await driver.executeAsyncScript(`
       const done = arguments[arguments.length - 1]
       const { PlacesUtils } = ChromeUtils.importESModule('resource://gre/modules/PlacesUtils.sys.mjs')
-      PlacesUtils.bookmarks.insert({ parentGuid: PlacesUtils.bookmarks.unfiledGuid, type: PlacesUtils.bookmarks.TYPE_FOLDER, title: 'FireDial' }).then(() => done())`)
+      const imported = async () => ((await PlacesUtils.promiseBookmarksTree(PlacesUtils.bookmarks.menuGuid)).children ?? []).length > 0
+      ;(async () => {
+        while (!(await imported())) await new Promise((resolve) => setTimeout(resolve, ${WAIT}))
+        await PlacesUtils.bookmarks.insert({ parentGuid: PlacesUtils.bookmarks.unfiledGuid, type: PlacesUtils.bookmarks.TYPE_FOLDER, title: 'FireDial' })
+        done()
+      })()`)
     await driver.setContext(firefox.Context.CONTENT)
   }
   return driver.installAddon('dist/firefox', true)
