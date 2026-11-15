@@ -1776,6 +1776,12 @@ body.editing .Sparks .Spark {
   content: '';
 }
 
+/* on Done, the button has the accent color itself: the dot takes the button's text color */
+.EditToggle--alert[aria-pressed='true']::after {
+  border-color: var(--accent-mark);
+  background: var(--on-accent);
+}
+
 .SyncChoice {
   display: flex;
   flex-direction: column;
