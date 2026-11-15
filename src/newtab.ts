@@ -68,7 +68,7 @@ import { Dropdown } from './ui/dropdown.ts'
 import type { Choice } from './ui/dropdown.ts'
 import { editable } from './ui/editable.ts'
 import { Modal } from './ui/modal.ts'
-import { initSync } from './ui/sync.ts'
+import { acrossBrowsers, initSync } from './ui/sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 
 const THUMB_MAX_WIDTH = 640
@@ -1306,7 +1306,7 @@ const importInput = $('#importFile', HTMLInputElement)
 
 // Asks first, then picks the file: the click on the answer still counts as the user's for the picker.
 async function askImport(): Promise<void> {
-  if (await confirm.ask(IMPORT)) importInput.click()
+  if (await confirm.ask(acrossBrowsers(IMPORT))) importInput.click()
 }
 
 importInput.addEventListener('change', () => {
@@ -2002,9 +2002,9 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
   about: () => {
     openAbout()
   },
-  'ask-delete-everything': () => void askFromAbout(DELETE_EVERYTHING, deleteEverything),
+  'ask-delete-everything': () => void askFromAbout(acrossBrowsers(DELETE_EVERYTHING), deleteEverything),
   'ask-reset-settings': () => void askFromAbout(RESET_SETTINGS, resetSettings),
-  'ask-start-over': () => void askFromAbout(START_OVER, startOver),
+  'ask-start-over': () => void askFromAbout(acrossBrowsers(START_OVER), startOver),
   reload: () => {
     location.reload()
   }

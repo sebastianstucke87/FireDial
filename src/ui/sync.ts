@@ -9,7 +9,7 @@ import { plural } from '../model.ts'
 import { browserKeyValue } from '../store.ts'
 import { parseSyncState } from '../sync.ts'
 import type { SyncCommand, SyncState } from '../sync.ts'
-import type { Confirm } from './confirm.ts'
+import type { Confirm, Question } from './confirm.ts'
 import { $, html } from './dom.ts'
 import { Modal } from './modal.ts'
 
@@ -40,6 +40,12 @@ export function statusText(state: SyncState, now = Date.now()): string {
   if (state.status === 'syncing' || !state.last) return 'Syncing…'
   return `Synced ${ago(state.last.at, now)} · ${state.last.device}`
 }
+
+let syncing = false // sync is on: replacing everything here replaces it in the other browsers too
+
+// A question about replacing all sparks, saying so when sync carries it on.
+export const acrossBrowsers = (question: Question): Question =>
+  syncing ? { ...question, text: `${question.text} Your other synced browsers follow.` } : question
 
 const send = (command: SyncCommand): Promise<unknown> => browser.runtime.sendMessage({ sync: command }).catch(() => undefined)
 
@@ -106,6 +112,7 @@ export function initSync(confirm: Confirm): void {
 
   async function refresh(): Promise<void> {
     state = parseSyncState((await browserKeyValue.get('sync'))['sync'])
+    syncing = state.on
     render()
     if (starting && state.status === 'choose') {
       starting = false
