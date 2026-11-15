@@ -60,7 +60,11 @@ MIT
 
 ## Privacy policy
 
-None needed: FireDial collects and sends no data (`data_collection_permissions: none`).
+A link to `PRIVACY.md`: the field mangles Markdown, and one copy stays in step by itself.
+
+```text
+FireDial collects no data. Its privacy policy: https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
+```
 
 ## Screenshots
 
