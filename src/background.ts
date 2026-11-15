@@ -1,7 +1,7 @@
 // "Add to FireDial ▸ <view>" in the browser's context menu everywhere: one item for all contexts,
 // no URL restriction. Links add the link, everything else the page. A view gives the spark its
 // label; Unlabeled adds it without one.
-// "New View" adds to a new view, named automatically; rename it in FireDial.
+// "New view" adds to a new view, named automatically; rename it in FireDial.
 // "Remove from FireDial" deletes sparks with the same link or page. Extensions learn the
 // page only with the click, so it's always enabled and the click finds out.
 // Also keeps the native bookmarks in sync with the store.
@@ -12,6 +12,7 @@ import * as z from 'zod/mini'
 
 import { parseBackup } from './backup.ts'
 import { BookmarkSync, hasBookmarkFolder, samePage } from './bookmarks.ts'
+import { blobToDataUrl, faviconPath, isStoredImage } from './images.ts'
 import { addTo, allocSpark, allocView, isVanilla, newThumbId, nextViewName, SparkId, toLabel, toSparkUrl, ViewId } from './model.ts'
 import type { Doc } from './model.ts'
 import { browserKeyValue, Store, webLock } from './store.ts'
@@ -36,7 +37,7 @@ async function buildMenu(): Promise<void> {
   })
   const views = store.doc.views.filter((view) => view.kind !== 'all')
   browser.menus.create({ contexts, id: 'add-root', title: 'Add to FireDial' }) // Browsers allow an extension one entry here, with the manifest's icon
-  browser.menus.create({ contexts, id: NEW_VIEW, parentId: 'add-root', title: 'New View' })
+  browser.menus.create({ contexts, id: NEW_VIEW, parentId: 'add-root', title: 'New view' })
   browser.menus.create({ contexts, id: REMOVE, parentId: 'add-root', title: 'Remove from FireDial' })
   browser.menus.create({ contexts, id: 'add-separator', parentId: 'add-root', type: 'separator' })
   for (const view of views) {
@@ -85,6 +86,20 @@ async function screenshot(tab: browser.tabs.Tab): Promise<string> {
   }
 }
 
+// The tab's icon as an image of its own. Firefox mostly gives one; Chrome gives the icon's web
+// address, so its own copy is taken instead. Nothing from the site itself: none when neither works.
+async function tabIcon(tab: browser.tabs.Tab): Promise<string> {
+  const given = tab.favIconUrl ?? ''
+  if (isStoredImage(given)) return given
+  if (!IS_CHROME || !tab.url) return ''
+  try {
+    const response = await fetch(browser.runtime.getURL(faviconPath(tab.url, 64)))
+    return response.ok ? await blobToDataUrl(await response.blob()) : ''
+  } catch {
+    return ''
+  }
+}
+
 async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab | undefined, viewId: ViewId | null): Promise<void> {
   const isLink = Boolean(info.linkUrl)
   const url = toSparkUrl(targetUrl(info, tab))
@@ -92,7 +107,7 @@ async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab |
   const title = toLabel((isLink ? info.linkText : tab?.title)?.trim() || url)
   // A screenshot; the tab's icon only when there is none.
   const shot = !isLink && tab?.active ? await screenshot(tab) : ''
-  const icon = !isLink && !shot ? (tab?.favIconUrl ?? '') : ''
+  const icon = !isLink && !shot && tab ? await tabIcon(tab) : ''
   const src = shot || icon
   const thumb = src ? newThumbId() : null
 
@@ -163,6 +178,14 @@ browser.bookmarks.onRemoved.addListener(() => {
 
 browser.runtime.onInstalled.addListener(rebuildMenu)
 browser.runtime.onStartup.addListener(rebuildMenu)
+
+// Access to sites, asked for by Refresh preview, the bookmark import or an image from a web page,
+// lasts until the browser closes: given back when it starts again.
+async function dropSiteAccess(): Promise<void> {
+  const { origins = [] } = await browser.permissions.getAll()
+  if (origins.length) await browser.permissions.remove({ origins }).catch(() => false)
+}
+browser.runtime.onStartup.addListener(() => void dropSiteAccess())
 rebuildMenu()
 // A fresh install starts with the sparks in defaults.json. Not when FireDial's bookmarks are
 // there already: sync turns those into the sparks instead. Before sync, so it pushes the defaults.

@@ -44,7 +44,7 @@
         <div class="Logo"><svg><use href="#i-flame"/></svg>FireDial</div>
       </div>
       <nav class="Groups" id="groups" aria-label="View list"></nav>
-      <button type="button" class="NewGroup Skeleton" id="newGroup" data-action="new-group" aria-label="New view"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <button type="button" class="NewGroup Skeleton" id="newGroup" data-action="new-group" aria-label="Add view"><svg class="icon"><use href="#i-plus"/></svg></button>
       <div class="Rail__resize" id="railResize" role="separator" aria-orientation="vertical" aria-label="View sidebar width" aria-valuemin="180" aria-valuemax="400" tabindex="0" title="Drag to resize, double-click for the default"></div>
     </aside>
 
@@ -63,10 +63,12 @@
       </div>
       <div class="BootError" id="bootError" role="alert" hidden>FireDial couldn't load your data. <button type="button" class="Button" data-action="reload">Reload</button></div>
       <main class="Main" id="main"><div class="Sparks" id="sparks"></div></main>
+      <div class="RefreshCard" id="refreshCard" role="status" hidden><span id="refreshText"></span><button type="button" class="Button" data-action="cancel-refresh">Cancel</button><progress id="refreshBar" max="1" value="0"></progress></div>
       <div class="Bars">
         <div class="BarStart">
           <button type="button" class="Trash Skeleton" id="trash" data-action="trash" hidden><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
           <button type="button" class="Button LabelBulk" id="labelBulk" data-action="label-bulk" hidden><svg class="icon"><use href="#i-tag"/></svg><span>Labels</span></button>
+          <button type="button" class="Button LabelBulk" id="refreshBulk" data-action="refresh-bulk" hidden><svg class="icon"><use href="#i-image"/></svg><span>Refresh preview</span></button>
           <button type="button" class="Button LabelBulk" id="removeFromView" data-action="remove-from-view" hidden><svg class="icon"><use href="#i-x"/></svg><span>Remove</span></button>
         </div>
         <div class="Segmented History" id="history" hidden>
@@ -177,6 +179,7 @@
             <div class="Drop"></div>
             <div class="Buttons">
               <button type="button" class="Button" data-action="upload">Upload</button>
+              <button type="button" class="Button" data-action="refresh-thumb">Refresh</button>
               <button type="button" class="Button" data-action="clear-thumb">Clear</button>
               <input name="file" type="file" accept="image/*" hidden>
             </div>

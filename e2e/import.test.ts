@@ -94,7 +94,7 @@ test('an import asks with numbers, makes labels and views, then loads the icons 
     { title: 'Loose', labels: [], thumb: true }
   ])
   assert.ok(asked.includes('/icon.png'))
-  assert.equal(await js('return browser.permissions.contains({ origins: ["<all_urls>"] })'), false, 'the access ends with the import')
+  assert.equal(await js('return browser.permissions.contains({ origins: ["<all_urls>"] })'), true, 'the access lasts until the browser closes')
 })
 
 test('a second import adds nothing, and undo takes the icons, then the import back', async () => {
