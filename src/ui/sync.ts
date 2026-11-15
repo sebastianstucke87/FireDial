@@ -59,7 +59,7 @@ async function showProgress(): Promise<void> {
 }
 
 export function initSync(confirm: Confirm): void {
-  const modal = new Modal($('#syncModal', HTMLDialogElement), 'Keep which sparks?')
+  const modal = new Modal($('#syncModal', HTMLDialogElement), 'Which sparks to keep?')
   const off = html('#syncOff')
   const on = html('#syncOn')
   const status = html('#syncStatus')
@@ -82,12 +82,23 @@ export function initSync(confirm: Confirm): void {
     editToggle.classList.toggle('EditToggle--alert', signin)
   }
 
+  // What the choice replaces, so nobody picks the wrong side by accident.
+  function showOutcome(): void {
+    const { choice } = state
+    if (!choice) return
+    html('#syncOutcome').textContent = $('input[value=local]', HTMLInputElement, modal.form).checked
+      ? `Replaces the ${plural(choice.sparks, 'spark')} on Drive and in your other browsers.`
+      : `Replaces the ${plural(choice.local, 'spark')} in this browser.`
+  }
+  modal.form.addEventListener('change', showOutcome)
+
   async function ask(): Promise<void> {
     const { choice } = state
     if (!choice) return
     html('#syncDrive').textContent = `${choice.device} · ${ago(choice.at)} · ${plural(choice.sparks, 'spark')}`
     html('#syncLocal').textContent = plural(choice.local, 'spark')
     $('input[value=drive]', HTMLInputElement, modal.form).checked = true
+    showOutcome()
     const answer = await modal.open()
     const from = $('input[value=local]', HTMLInputElement, modal.form).checked ? 'local' : 'drive'
     await send(answer === 'save' ? from : 'stop')
