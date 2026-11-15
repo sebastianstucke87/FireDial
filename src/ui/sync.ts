@@ -17,6 +17,9 @@ const MINUTE = 60_000 // ms
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
+// Easy to take back: both sides keep everything, so a plain question.
+const STOP_SYNC = { title: 'Stop sync', text: 'Stop sync? This browser and your Google Drive keep their sparks.', button: 'Stop sync', plain: true }
+
 const DELETE_FROM_DRIVE = {
   title: 'Delete from Drive',
   text: 'Delete from Drive. This will delete all FireDial sparks, views and previews from your Google Drive, stop sync and remove FireDial’s access to Drive. This browser keeps them.',
@@ -121,7 +124,9 @@ export function initSync(confirm: Confirm): void {
     signin: async () => {
       if (await start(state.email)) await send('now')
     },
-    stop: () => send('stop'),
+    stop: async () => {
+      if (await confirm.ask(STOP_SYNC)) await send('stop')
+    },
     delete: async () => {
       if (await confirm.ask(DELETE_FROM_DRIVE)) await send('delete')
     }
