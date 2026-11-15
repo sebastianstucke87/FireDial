@@ -1464,10 +1464,6 @@ body.editing .Sparks .Spark {
   gap: 8px;
 }
 
-.Buttons--stack {
-  grid-auto-flow: row; /* labels too long for one row */
-}
-
 .Buttons .Button {
   padding: 0 8px; /* room for three labels in the About width */
   white-space: nowrap;
@@ -1755,18 +1751,15 @@ body.editing .Sparks .Spark {
   background: var(--accent-hover);
 }
 
-/* Sync: the status line, the dot on Edit when sync waits for a sign-in, the first sync's choice */
-.SyncStatus,
-.SyncEmail {
-  margin: 0;
+/* Sync: status and account as the labels of their rows, the dot on Edit when sync waits for a
+   sign-in, the first sync's choice */
+.SyncLabel {
+  color: var(--muted);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
-.SyncEmail {
-  color: var(--muted);
-}
-
-.SyncStatus--alert {
+.SyncLabel.SyncStatus--alert {
   color: var(--accent-mark);
   font-weight: 600;
 }
