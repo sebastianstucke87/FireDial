@@ -49,7 +49,13 @@ To load it in Chrome:
 
 ## Trust
 
-- FireDial is only published at `github.com/sebastianstucke87/FireDial`, `chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk` and `addons.mozilla.org/firefox/addon/firedial`. Anything else claiming to be FireDial is fake; report it.
 - FireDial collects no data: [privacy policy](PRIVACY.md).
 - FireDial is not for sale.
-- Something odd? [Open an issue](https://github.com/sebastianstucke87/FireDial/issues) or [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new).
+- FireDial is published at:
+  - GitHub: [github.com/sebastianstucke87/FireDial](https://github.com/sebastianstucke87/FireDial)
+  - Google, Chrome Web Store: [chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk](https://chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk)
+  - Mozilla, Firefox Add-ons: [addons.mozilla.org/firefox/addon/firedial](https://addons.mozilla.org/firefox/addon/firedial)
+
+  Anything else claiming to be FireDial is fake; report it to the organization that hosts it.
+
+- Contact: [Open an issue](https://github.com/sebastianstucke87/FireDial/issues) or [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new).
