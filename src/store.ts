@@ -115,6 +115,8 @@ const NextIds = z.catch(z.object({ view: Revision, spark: Revision }), { view: 0
 const List = z.catch(z.array(z.unknown()), [])
 const Colors = z.catch(z.record(z.string(), z.unknown()), {})
 
+export const parseDoc = (data: Record<string, unknown>): Doc => parseState(data).doc
+
 function parseState(data: Record<string, unknown>): State {
   const fallback = emptyDoc()
   const ids = NextIds.parse(data['nextIds'])
@@ -129,7 +131,8 @@ function parseState(data: Record<string, unknown>): State {
   return { doc, rev: Revision.parse(data['rev']), history: HistoryMetaSchema.parse(data['history']) }
 }
 
-const docItems = (doc: Doc): Record<string, unknown> => ({
+// A doc as stored, in storage.local and on Drive.
+export const docItems = (doc: Doc): Record<string, unknown> => ({
   views: doc.views,
   sparks: doc.sparks,
   prefs: doc.prefs,
@@ -306,6 +309,12 @@ export class Store {
       this.adopt({ doc, rev: state.rev + 1, history })
       return doc.views.find((view) => view.kind === 'all')?.id ?? ViewId.parse(0)
     })
+  }
+
+  // The images stored here.
+  async thumbIds(): Promise<Set<ThumbId>> {
+    const { thumbIndex } = await this.kv.get('thumbIndex')
+    return new Set(parseThumbIndex(thumbIndex))
   }
 
   async thumbs(ids: readonly ThumbId[]): Promise<Map<ThumbId, string>> {

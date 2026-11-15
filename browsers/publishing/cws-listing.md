@@ -64,6 +64,7 @@ Shows the user's bookmarks as a speed dial on the new tab page.
 | `scripting`             | The short confirmation shown on that page after adding                                                                                                          |
 | `search`                | Searching the web from the new tab with the user's default search engine                                                                                        |
 | `downloads`             | Saving backups                                                                                                                                                  |
+| `identity`              | Signing in to Google for the optional Sync, which keeps the user's sparks in their own Google Drive app folder                                                  |
 | `favicon`               | A page's icon from Chrome's own copy when no preview can be taken, so the site isn't asked                                                                      |
 | `storage`               | Settings, undo history, preview images                                                                                                                          |
 | `unlimitedStorage`      | Preview images can outgrow the default quota                                                                                                                    |
@@ -75,7 +76,7 @@ No, I am not using remote code.
 
 ### Data usage
 
-Nothing collected. Tick the three certifications.
+Nothing collected by the developer. Sync is optional: it sends the user's sparks, settings and previews to their own Google Drive app folder (scope `drive.appdata`) and nowhere else. Tick "Website content" (previews) and the three certifications.
 
 ### Privacy policy URL
 

@@ -1,6 +1,6 @@
 # FireDial privacy policy
 
-FireDial collects no data. It has no servers, no accounts, no analytics and no ads. Nothing is sold, shared or sent to anyone. Everything FireDial handles stays on your device, except bookmarks your browser syncs, if sync is on.
+FireDial collects no data. It has no servers, no accounts, no analytics and no ads. Nothing is sold, shared or sent to anyone. Everything FireDial handles stays on your device, except bookmarks your browser syncs, if sync is on, and what you sync to your own Google Drive, if you turn on Sync.
 
 ## What FireDial handles
 
@@ -11,6 +11,8 @@ FireDial collects no data. It has no servers, no accounts, no analytics and no a
 | Website content: site icons                | The spark's icon                       | Extension storage on your device                      |
 | Settings and undo history                  | Layout, colors, views, undoing changes | Extension storage on your device                      |
 | Backups                                    | Saving your sparks to a file           | A file in your downloads folder, when you ask for one |
+| Sparks, views, settings and previews       | Sync between your browsers             | Your Google Drive, only if you turn on Sync           |
+| Your Google account's email address        | Shows which account Sync uses          | Extension storage on your device                      |
 
 FireDial handles no other data.
 
@@ -21,6 +23,8 @@ FireDial handles no other data.
 - **Refresh preview:** only when you choose it and allow access to all sites, FireDial opens the page in a tab, takes a new preview and closes the tab. If the page can't be captured, it loads the site's icon instead. FireDial keeps that access until you close the browser.
 - **Image from a web page:** only when you click "Load image" and allow access to that site, FireDial loads that image once and keeps it on your device. FireDial keeps that access until you close the browser.
 
+- **Sync:** only if you click "Sync with Google Drive" and sign in to Google. FireDial then keeps your sparks, views, settings and previews in a hidden FireDial folder in your own Google Drive (Google's app data folder), and reads them from there in your other browsers. It can't see any other file in your Drive. The data goes from your browser to Google and back; it never passes through anyone else. Google's privacy policy applies to what's stored there.
+
 FireDial makes no other connections.
 
 ## Third-party code
@@ -30,6 +34,8 @@ FireDial contains no third-party tracking or data collection. The libraries it b
 ## Removing your data
 
 Uninstalling FireDial deletes its extension storage. Your browser bookmarks and downloaded backup files stay until you delete them from your device.
+
+If you used Sync, "Delete from Drive" in FireDial's settings deletes everything FireDial put in your Google Drive. You can also remove it in Google Drive under Settings → Manage apps → FireDial → Delete hidden app data.
 
 ## Official sources
 

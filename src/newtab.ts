@@ -68,6 +68,7 @@ import { Dropdown } from './ui/dropdown.ts'
 import type { Choice } from './ui/dropdown.ts'
 import { editable } from './ui/editable.ts'
 import { Modal } from './ui/modal.ts'
+import { initSync } from './ui/sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 
 const THUMB_MAX_WIDTH = 640
@@ -2660,6 +2661,7 @@ async function init(): Promise<void> {
   if (revealing !== null) revealSpark(revealing)
   store.watch(() => void followStore())
   void loadEngines()
+  initSync(confirm)
 }
 
 void init()

@@ -1751,6 +1751,70 @@ body.editing .Sparks .Spark {
   background: var(--accent-hover);
 }
 
+/* Sync: the status line, the dot on Edit when sync waits for a sign-in, the first sync's choice */
+.SyncStatus,
+.SyncEmail {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.SyncEmail {
+  color: var(--muted);
+}
+
+.SyncStatus--alert {
+  color: var(--accent-mark);
+  font-weight: 600;
+}
+
+.EditToggle--alert::after {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--bg);
+  border-radius: 999px;
+  background: var(--accent-mark);
+  content: '';
+}
+
+.SyncChoice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.SyncOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.SyncOption:has(input:checked) {
+  border-color: var(--accent-mark);
+  background: var(--accent-soft);
+}
+
+.SyncOption input {
+  margin: 3px 0 0;
+  accent-color: var(--accent-mark);
+}
+
+.SyncOption span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.SyncOption small {
+  color: var(--muted);
+}
+
 /* can't be taken back: outlined, with the warning sign. The last step, the question, is .Button--primary */
 .Button--warn {
   border: 2px solid var(--accent-mark);

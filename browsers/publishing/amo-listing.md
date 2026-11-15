@@ -63,7 +63,7 @@ MIT
 A link to `PRIVACY.md`: the field mangles Markdown, and one copy stays in step by itself.
 
 ```text
-FireDial collects no data. Its privacy policy: https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
+FireDial collects no data. Optional Sync keeps your sparks in your own Google Drive. Its privacy policy: https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
 ```
 
 ## Screenshots

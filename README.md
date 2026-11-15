@@ -49,7 +49,7 @@ To load it in Chrome:
 
 ## Trust
 
-- FireDial collects no data: [privacy policy](PRIVACY.md).
+- FireDial collects no data: [privacy policy](PRIVACY.md). Sync is optional and goes to your own Google Drive.
 - FireDial is not for sale.
 - FireDial is published at:
   - GitHub: [github.com/sebastianstucke87/FireDial](https://github.com/sebastianstucke87/FireDial)
