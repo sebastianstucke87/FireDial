@@ -21,6 +21,16 @@ import type { KeyValue, Store } from './store.ts'
 const STATE_FILE = 'state.json'
 const THUMB_PREFIX = 'thumb-'
 const ROUNDS = 5 // pull-then-push rounds before giving up until the next change
+const PARALLEL = 8 // Drive requests at once: each image waits about a second for Google, not for the line
+
+// Runs task for each item, PARALLEL at a time.
+async function inParallel<T>(items: readonly T[], task: (item: T) => Promise<void>): Promise<void> {
+  const queue = [...items]
+  const worker = async (): Promise<void> => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) await task(item)
+  }
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, items.length) }, worker))
+}
 
 // What a FireDial page asks the background for: { sync: command }.
 export const SyncCommand = z.enum(['start', 'pull', 'now', 'drive', 'local', 'stop', 'delete'])
@@ -218,7 +228,7 @@ export class Sync {
   // Everything FireDial put on Drive goes, and sync stops.
   deleteFromDrive(): Promise<void> {
     return this.serial(async () => {
-      for (const file of await this.drive.list()) await this.drive.remove(file.id)
+      await inParallel(await this.drive.list(), (file) => this.drive.remove(file.id))
       await this.kv.remove('syncBase')
       await this.kv.set({ sync: parseSyncState({}) })
     })
@@ -250,10 +260,10 @@ export class Sync {
     const missing = [...thumbsOf(target)].filter((id) => !have.has(id))
     const files = missing.length ? new Map((await this.drive.list()).map((file) => [file.name, file.id])) : new Map<string, string>()
     const thumbs: Record<ThumbId, string> = {}
-    for (const id of missing) {
+    await inParallel(missing, async (id) => {
       const file = files.get(thumbName(id))
       if (file) thumbs[id] = await this.drive.read(file) // gone from Drive: the spark goes without
-    }
+    })
     return this.store.commit(becomes(target), { thumbs, unchecked: true, ifRevision: revision })
   }
 
@@ -288,7 +298,12 @@ export class Sync {
     const wanted = thumbsOf(local)
     const missing = [...wanted].filter((id) => !names.has(thumbName(id)))
     const images = await this.store.thumbs(missing)
-    for (const [id, src] of images) if (src) await this.drive.create(thumbName(id), src)
+    await inParallel(
+      [...images].filter(([, src]) => src),
+      async ([id, src]) => {
+        await this.drive.create(thumbName(id), src)
+      }
+    )
     const version = state.version + 1
     const stamp = { device: state.device, at: this.now() }
     const body = JSON.stringify({ version, device: stamp.device, savedAt: stamp.at, doc: docItems(local) })
@@ -300,6 +315,7 @@ export class Sync {
     await this.update({ status: 'ok', version, last: stamp, lastPull: this.now() })
     // Images no doc on Drive refers to any more.
     const keep = new Set([...wanted].map(thumbName))
-    for (const { name, id } of files) if (name.startsWith(THUMB_PREFIX) && !keep.has(name)) await this.drive.remove(id)
+    const unused = files.filter(({ name }) => name.startsWith(THUMB_PREFIX) && !keep.has(name))
+    await inParallel(unused, (file) => this.drive.remove(file.id))
   }
 }
