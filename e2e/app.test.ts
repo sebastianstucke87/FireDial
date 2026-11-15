@@ -414,7 +414,9 @@ test('About ends with the version, the address and the licenses, and warns in th
   )
   assert.deepEqual(warnings, ['Import #i-alert', 'Delete from Drive #i-alert', 'Delete all #i-alert', 'Start over #i-alert', 'View and sparks #i-alert'])
   assert.ok(
-    await js("return [...document.querySelectorAll('#aboutModal .Section:not([hidden]) .Button--warn')].every((button) => button.getBoundingClientRect().height === 40)"),
+    await js(
+      "return [...document.querySelectorAll('#aboutModal .Section:not([hidden]) .Button--warn')].every((button) => button.getBoundingClientRect().height === 40)"
+    ),
     'each label on one line'
   )
   assert.deepEqual(
