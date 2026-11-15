@@ -56,17 +56,18 @@ Shows the user's bookmarks as a speed dial on the new tab page.
 
 ### Permission justification
 
-| Permission              | Justification                                                                                               |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `bookmarks`             | Sparks are stored as bookmarks                                                                              |
-| `contextMenus`          | The Add to FireDial context menu                                                                            |
-| `activeTab`             | A preview image of the page being added                                                                     |
-| `scripting`             | The short confirmation shown on that page after adding                                                      |
-| `search`                | Searching the web from the new tab with the user's default search engine                                    |
-| `downloads`             | Saving backups                                                                                              |
-| `storage`               | Settings, undo history, preview images                                                                      |
-| `unlimitedStorage`      | Preview images can outgrow the default quota                                                                |
-| `<all_urls>` (optional) | Asked for only by the bookmark import, to load each site's icon from the site itself; given back afterwards |
+| Permission              | Justification                                                                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bookmarks`             | Sparks are stored as bookmarks                                                                                                                                  |
+| `contextMenus`          | The Add to FireDial context menu                                                                                                                                |
+| `activeTab`             | A preview image of the page being added                                                                                                                         |
+| `scripting`             | The short confirmation shown on that page after adding                                                                                                          |
+| `search`                | Searching the web from the new tab with the user's default search engine                                                                                        |
+| `downloads`             | Saving backups                                                                                                                                                  |
+| `favicon`               | A page's icon from Chrome's own copy when no preview can be taken, so the site isn't asked                                                                      |
+| `storage`               | Settings, undo history, preview images                                                                                                                          |
+| `unlimitedStorage`      | Preview images can outgrow the default quota                                                                                                                    |
+| `<all_urls>` (optional) | Asked for only when the user imports bookmarks, refreshes a preview (to capture the page) or loads an image from a web page; given back when the browser closes |
 
 ### Remote code
 
@@ -78,7 +79,7 @@ Nothing collected. Tick the three certifications.
 
 ### Privacy policy URL
 
-https://github.com/sebastianstucke87/FireDial#trust (FireDial collects and sends no data)
+https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
 
 ## Distribution
 

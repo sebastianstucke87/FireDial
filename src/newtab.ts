@@ -1,12 +1,13 @@
 // FireDial new tab page.
 
-import { BROWSER_NAME, searchEngines, searchWeb } from './browser.ts'
+import { BROWSER_NAME, IS_CHROME, searchEngines, searchWeb } from './browser.ts'
 
 import { backupName, exportParts, importSummary, readBackup } from './backup.ts'
 import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
+import { blobToDataUrl, isStoredImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
   accentOf,
@@ -510,7 +511,8 @@ function thumbBox(preview: { title: string; url: string }, src: string, thumb: T
   const box = el('div', { class: 'Thumb' })
   const known = thumb ? colors.get(thumb) : undefined
   const letter = (): HTMLElement => el('span', { class: 'Letter' }, letterOf(preview))
-  if (!src) {
+  // A web address (from older versions or a backup) would be loaded from its site: the letter instead.
+  if (!isStoredImage(src)) {
     box.append(letter())
     return box
   }
@@ -630,10 +632,12 @@ function renderTrash(): void {
   renderBulk()
 }
 
-// What the band offers for marked sparks: labels, and taking them out of the open view.
+// What the band offers for marked sparks: labels, new previews, and taking them out of the open view.
 function renderBulk(): void {
   const view = activeView()
   labelBulk.hidden = !editing || !selection.size
+  refreshBulk.hidden = !editing || !selection.size
+  html('span', refreshBulk).textContent = selection.size > 1 ? 'Refresh previews' : 'Refresh preview'
   removeButton.hidden = !editing || !selection.size || view?.kind !== 'normal' || Boolean(query)
   html('span', removeButton).textContent = view ? `Remove from ${view.title}` : 'Remove'
 }
@@ -1324,7 +1328,7 @@ async function copyUrl(spark: Spark): Promise<void> {
   notify('URL copied')
 }
 
-const MANY_TABS = 15 // from here on, Open all asks first
+const MANY_TABS = 15 // from here on, opening (or refreshing) that many pages asks first
 
 async function openAll(view: View): Promise<void> {
   const urls = arrange(store.doc, view).map((spark) => spark.url)
@@ -1332,7 +1336,11 @@ async function openAll(view: View): Promise<void> {
     notify(`${view.title} has no sparks`)
     return
   }
-  if (urls.length >= MANY_TABS && !(await confirm.ask({ title: 'Open all', text: `Open ${urls.length} tabs?`, button: 'Open', plain: true }))) return
+  await openUrls(urls, 'Open all')
+}
+
+async function openUrls(urls: readonly string[], title = 'Open'): Promise<void> {
+  if (urls.length >= MANY_TABS && !(await confirm.ask({ title, text: `Open ${urls.length} tabs?`, button: 'Open', plain: true }))) return
   urls.forEach(openTab)
   notify(`Opened ${plural(urls.length, 'tab')}`)
 }
@@ -1345,7 +1353,15 @@ async function newViewFrom(spark: Spark): Promise<void> {
   focusViewName(active)
 }
 
+// Like a file manager: a right-click on a marked spark acts on all marked ones; on any other spark,
+// it becomes the only marked one and the menu acts on it alone.
 function sparkMenu(spark: Spark): MenuEntry[] {
+  if (selection.size && !selection.has(spark.id)) changeSelection([spark.id])
+  const marked = selection.size > 1 ? store.doc.sparks.filter((item) => selection.has(item.id)) : []
+  return marked.length > 1 ? markedMenu(marked) : oneSparkMenu(spark)
+}
+
+function oneSparkMenu(spark: Spark): MenuEntry[] {
   const open = {
     icon: 'open',
     label: 'Open in new tab',
@@ -1363,13 +1379,29 @@ function sparkMenu(spark: Spark): MenuEntry[] {
       void openLabelModal()
     }
   }
-  const fromThese = { icon: 'plus', label: 'New view from these', run: () => void newViewFrom(spark) }
+  const fromThese = { icon: 'plus', label: 'Add view', run: () => void newViewFrom(spark) }
   return [
     open,
-    { icon: 'edit', label: 'Edit', run: () => void openSparkModal(spark) },
+    { icon: 'edit', label: 'Edit spark', run: () => void openSparkModal(spark) },
     ...(editing ? [labels, fromThese] : []),
+    { icon: 'image', label: 'Refresh preview', run: () => void refreshPreviews([spark]) },
     copy,
     { icon: 'trash', label: 'Delete', run: () => void deleteSpark(spark) }
+  ]
+}
+
+// Everything here acts on all marked sparks, and says how many.
+function markedMenu(sparks: readonly Spark[]): MenuEntry[] {
+  const count = sparks.length
+  const open = { icon: 'open', label: 'Open in new tabs', run: () => void openUrls(sparks.map((spark) => spark.url)) }
+  if (narrow.matches) return [open]
+  const [first] = sparks
+  return [
+    open,
+    { icon: 'tag', label: 'Labels', run: () => void openLabelModal() },
+    ...(first ? [{ icon: 'plus', label: 'Add view', run: () => void newViewFrom(first) }] : []),
+    { icon: 'image', label: 'Refresh previews', run: () => void refreshPreviews(sparks) },
+    { icon: 'trash', label: `Delete ${count}`, run: () => void deleteItems(new Set(sparks.map((spark) => spark.id)), new Set()) }
   ]
 }
 
@@ -1377,7 +1409,7 @@ function viewMenu(view: View): MenuEntry[] {
   const own =
     view.kind === 'normal'
       ? [
-          { icon: 'search', label: 'Edit', run: () => void openRuleModal(view) },
+          { icon: 'search', label: 'Edit view', run: () => void openRuleModal(view) },
           { icon: 'trash', label: 'Delete', run: () => void deleteOneView(view) }
         ]
       : []
@@ -1403,8 +1435,8 @@ function viewMenu(view: View): MenuEntry[] {
 function pageMenu(): MenuEntry[] {
   const view = activeView()
   return [
-    { icon: 'plus', label: 'New spark', run: () => void openSparkModal() },
-    { icon: 'plus', label: 'New view', run: startNewGroup },
+    { icon: 'plus', label: 'Add spark', run: () => void openSparkModal() },
+    { icon: 'plus', label: 'Add view', run: startNewGroup },
     ...(editing && view?.kind === 'normal' && !query ? [{ icon: 'search', label: 'Edit view', run: () => void openRuleModal(view) }] : []),
     {
       icon: 'edit',
@@ -1490,6 +1522,7 @@ const fieldOf = (input: HTMLInputElement): HTMLElement => {
   return node
 }
 const clearThumb = $('[data-action="clear-thumb"]', HTMLButtonElement, sparkForm)
+const refreshThumb = $('[data-action="refresh-thumb"]', HTMLButtonElement, sparkForm)
 const sparkLabelError = html('#sparkLabelError')
 const knownNow = (): LabelName[] => knownLabels(store.doc)
 const tooMany = (): boolean => sparkLabels.values.length > LIMITS.labelsPerSpark
@@ -1503,13 +1536,26 @@ const sparkLabels = new ChipField(html('#sparkLabels'), {
   }
 })
 let draftSrc = ''
+// An image dragged from a web page comes as its address: loaded once, on request, then kept.
+let draftLink = ''
+let capturing = false
+
+function draftHint(): HTMLElement[] {
+  if (draftSrc) return []
+  const host = draftLink ? hostOf(draftLink) : ''
+  if (!host) return [el('div', { class: 'Drop__hint' }, 'Paste or drop a preview')]
+  const load = el('button', { type: 'button', class: 'Button' }, `Load image from ${host}`)
+  load.addEventListener('click', () => void loadDraftLink())
+  return [el('div', { class: 'Drop__hint' }, load)]
+}
 
 // The preview and the clear buttons follow the draft and the fields.
 function renderPreview(): void {
   const preview = { title: titleField.value, url: urlField.value }
   sparkDrop.classList.toggle('Drop--empty', !draftSrc)
-  sparkDrop.replaceChildren(thumbBox(preview, draftSrc, null), ...(draftSrc ? [] : [el('div', { class: 'Drop__hint' }, 'Paste or drop a preview')]))
-  clearThumb.disabled = !draftSrc
+  sparkDrop.replaceChildren(thumbBox(preview, draftSrc, null), ...draftHint())
+  clearThumb.disabled = !draftSrc && !draftLink
+  refreshThumb.disabled = capturing || !originOf(normalizeUrl(preview.url))
   refreshTitleClear()
   refreshUrlClear()
   titleField.placeholder = hostOf(preview.url) || 'Title'
@@ -1517,12 +1563,63 @@ function renderPreview(): void {
 
 async function setDraftImage(file: File | undefined): Promise<void> {
   if (!file?.type.startsWith('image/')) return
+  draftLink = ''
   draftSrc = await shrinkImage(await readFile(file))
   renderPreview()
 }
 
+// A new preview of the page in the URL field. Access to all sites (what a capture needs) is asked
+// for by the click itself and kept until the browser closes; saved with the spark like any other preview.
+async function refreshDraft(): Promise<void> {
+  const url = normalizeUrl(urlField.value)
+  if (!originOf(url)) return
+  if (!(await browser.permissions.request(ALL_SITES).catch(() => false))) {
+    notify('Not refreshed: FireDial needs access to the site to take a preview')
+    return
+  }
+  capturing = true
+  renderPreview()
+  try {
+    const src = await capturePage(url, new AbortController())
+    if (src) {
+      draftLink = ''
+      draftSrc = src
+    } else notify(`No preview could be taken of ${hostOf(url)}`)
+  } finally {
+    capturing = false
+    renderPreview()
+  }
+}
+
+// Access to the image's site is asked for by the click itself, and kept until the browser closes.
+async function loadDraftLink(): Promise<void> {
+  const link = draftLink
+  const origin = originOf(link)
+  if (!origin) return
+  const access = siteAccess([origin])
+  if (!(await browser.permissions.request(access).catch(() => false))) {
+    notify(`Not loaded: FireDial needs access to ${hostOf(link)}`)
+    return
+  }
+  try {
+    const response = await fetch(link, { credentials: 'omit' })
+    const blob = response.ok ? await response.blob() : null
+    if (!blob?.type.startsWith('image/')) {
+      notify('Not loaded: no image at that address')
+      return
+    }
+    const src = await shrinkImage(await blobToDataUrl(blob))
+    if (draftLink !== link) return
+    draftLink = ''
+    draftSrc = src
+    renderPreview()
+  } catch {
+    notify(`Not loaded: ${hostOf(link)} didn't answer`)
+  }
+}
+
 async function openSparkModal(spark?: Spark): Promise<void> {
-  sparkModal.title = spark ? 'Edit' : 'Add spark'
+  sparkModal.title = spark ? 'Edit spark' : 'Add spark'
   html('#sparkSave', sparkForm).textContent = spark ? 'Save' : 'Add'
   titleField.value = spark?.title ?? ''
   urlField.value = spark?.url ?? ''
@@ -1531,6 +1628,7 @@ async function openSparkModal(spark?: Spark): Promise<void> {
   if (spark) await loadThumbs([spark])
   const srcBefore = spark ? thumbOf(spark) : ''
   draftSrc = srcBefore
+  draftLink = ''
   sparkLabels.set(spark ? spark.labels : view?.kind === 'normal' ? [view.title] : [])
   renderPreview()
 
@@ -1612,7 +1710,13 @@ sparkDrop.addEventListener('drop', (event) => {
     .split('\n')
     .find((line) => line && !line.startsWith('#'))
   if (!link) return
-  draftSrc = link.trim()
+  if (isStoredImage(link.trim())) {
+    draftLink = ''
+    draftSrc = link.trim()
+  } else {
+    draftLink = link.trim()
+    draftSrc = ''
+  }
   renderPreview()
 })
 
@@ -1753,6 +1857,7 @@ document.addEventListener('dragend', endDrag)
 
 const labelBulk = $('#labelBulk', HTMLButtonElement)
 const removeButton = $('#removeFromView', HTMLButtonElement)
+const refreshBulk = $('#refreshBulk', HTMLButtonElement)
 const trash = html('#trash')
 
 async function throwAway(dragged: Drag): Promise<void> {
@@ -1877,14 +1982,20 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
   },
   'label-bulk': () => void openLabelModal(),
   'remove-from-view': () => void removeFromActive(new Set(selection)),
+  'cancel-refresh': () => {
+    refreshing?.abort()
+  },
+  'refresh-bulk': () => void refreshPreviews(store.doc.sparks.filter((spark) => selection.has(spark.id))),
   'import-bookmarks': () => void importBookmarks(),
   export: () => void exportData(),
   import: () => void askImport(),
   upload: () => {
     fileField.click()
   },
+  'refresh-thumb': () => void refreshDraft(),
   'clear-thumb': () => {
     draftSrc = ''
+    draftLink = ''
     renderPreview()
   },
   about: () => {
@@ -2059,12 +2170,10 @@ const aboutModal = new Modal($('#aboutModal', HTMLDialogElement), 'FireDial')
 const confirm = new Confirm()
 
 // The browser's bookmarks, once: read only, into labels and views; then each site's icon, which is
-// what the access to all sites is for. It ends with the import.
+// what the access to all sites is for. It lasts until the browser closes.
 
 const ICON_SIZE = 96 // px at most: under SMALL_IMAGE, so it shows as an icon
 const ALL_SITES = { origins: ['<all_urls>'] }
-
-const dropSiteAccess = (): Promise<unknown> => browser.permissions.remove(ALL_SITES).catch(() => false)
 
 // Access to all sites is asked for only with something to import, by the Import button itself.
 async function importBookmarks(): Promise<void> {
@@ -2133,38 +2242,195 @@ async function iconImage(response: Response): Promise<string | null> {
   }
 }
 
+const originsOf = (sparks: readonly Spark[]): string[] => [...new Set(sparks.map((spark) => originOf(spark.url)).filter((origin) => origin !== null))]
+
 async function loadSparkIcons(ids: ReadonlySet<SparkId>): Promise<void> {
+  const wanted = store.doc.sparks.filter((spark) => ids.has(spark.id) && !spark.thumb)
+  const origins = originsOf(wanted)
+  if (!origins.length) return
+  const icons = await loadIcons(origins, iconImage)
+  const chosen = new Map<SparkId, ThumbId>()
+  const images: Record<ThumbId, string> = {}
+  for (const spark of wanted) {
+    const origin = originOf(spark.url)
+    const src = origin ? icons.get(origin) : undefined
+    if (!src) continue
+    const id = newThumbId()
+    chosen.set(spark.id, id)
+    images[id] = src
+    thumbs.set(id, src)
+  }
+  if (chosen.size) {
+    await change(
+      (doc) => {
+        for (const spark of doc.sparks) {
+          const thumb = chosen.get(spark.id)
+          if (thumb && !spark.thumb) spark.thumb = thumb
+        }
+        return undefined
+      },
+      { thumbs: images }
+    )
+  }
+}
+
+// Previews, taken again: each page opens in a tab of its own, is captured once it has loaded, and
+// the tab closes; FireDial's tab comes back. A page that can't be captured gets its site's icon.
+
+const PAGE_WAIT = 15_000 // ms at most for a page to load
+const PAGE_SETTLE = 600 // ms after loading, for late images and fonts
+
+// Once the tab has loaded, after PAGE_WAIT, or on a cancel.
+function tabLoaded(tabId: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      browser.tabs.onUpdated.removeListener(listen)
+      signal.removeEventListener('abort', done)
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', done)
+    const listen = (id: number, info: browser.tabs._OnUpdatedChangeInfo): void => {
+      if (id === tabId && info.status === 'complete') done()
+    }
+    const timer = setTimeout(done, PAGE_WAIT)
+    browser.tabs.onUpdated.addListener(listen)
+    // It may have loaded before the listener was there.
+    void browser.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status === 'complete') done()
+      },
+      () => {
+        done()
+      }
+    )
+  })
+}
+
+const NOTE_TIME = 800 // ms the note on a captured page stays before its tab closes
+
+// Needs access to all sites, which the caller asks for (kept until the browser closes). Closing the page's tab
+// cancels the whole refresh, like the card's Cancel.
+// Firefox captures a tab in the background, so FireDial and its card stay in front. Chrome only
+// captures the tab in front: the page shows, and note (if any) appears on it once it's captured.
+async function capturePage(url: string, cancel: AbortController, note: string | null = null): Promise<string> {
+  const home = await browser.tabs.getCurrent()
+  const tab = await browser.tabs.create({ url, active: IS_CHROME, ...(home?.windowId === undefined ? {} : { windowId: home.windowId }) })
+  let ending = false
+  const closed = (id: number): void => {
+    if (id === tab.id && !ending) cancel.abort()
+  }
+  browser.tabs.onRemoved.addListener(closed)
   try {
-    const wanted = store.doc.sparks.filter((spark) => ids.has(spark.id) && !spark.thumb)
-    const origins = [...new Set(wanted.map((spark) => originOf(spark.url)).filter((origin) => origin !== null))]
-    if (!origins.length) return
-    const icons = await loadIcons(origins, iconImage)
-    const chosen = new Map<SparkId, ThumbId>()
-    const images: Record<ThumbId, string> = {}
-    for (const spark of wanted) {
-      const origin = originOf(spark.url)
-      const src = origin ? icons.get(origin) : undefined
+    if (tab.id === undefined) return ''
+    const tabId = tab.id
+    await tabLoaded(tabId, cancel.signal)
+    await new Promise((resolve) => setTimeout(resolve, PAGE_SETTLE))
+    if (cancel.signal.aborted) return ''
+    let src = ''
+    try {
+      const shot = IS_CHROME
+        ? await browser.tabs.captureVisibleTab(tab.windowId ?? browser.windows.WINDOW_ID_CURRENT, { format: 'jpeg', quality: 85 })
+        : await browser.tabs.captureTab(tabId, { format: 'jpeg', quality: 85 })
+      src = await shrinkImage(shot)
+    } catch {
+      const origin = originOf(url)
+      src = origin ? ((await loadIcons([origin], iconImage)).get(origin) ?? '') : ''
+    }
+    const stopped = (): boolean => cancel.signal.aborted // read anew: closing the tab cancels meanwhile
+    if (note && IS_CHROME && !stopped()) {
+      await browser.scripting.executeScript({ target: { tabId }, func: showToast, args: toastArgs(note, store.doc.prefs) }).catch(() => undefined)
+      await new Promise((resolve) => setTimeout(resolve, NOTE_TIME))
+    }
+    return src
+  } finally {
+    ending = true
+    browser.tabs.onRemoved.removeListener(closed)
+    if (tab.id !== undefined) await browser.tabs.remove(tab.id).catch(() => undefined)
+    if (IS_CHROME && home?.id !== undefined) await browser.tabs.update(home.id, { active: true }).catch(() => undefined)
+  }
+}
+
+// The card that stays while previews are taken: how far it is, and Cancel. One refresh at a time.
+const refreshCard = html('#refreshCard')
+const refreshBar = $('#refreshBar', HTMLProgressElement)
+let refreshing: AbortController | null = null
+
+const pageTitle = document.title
+
+// The card, and FireDial's tab title: in Chrome the page being captured is in front, the tab strip isn't.
+function showRefresh(done: number, total: number): void {
+  html('#refreshText').textContent = total > 1 ? `Refreshing previews: ${done + 1} of ${total}` : 'Refreshing preview'
+  refreshBar.value = done / total
+  refreshCard.hidden = false
+  document.title = total > 1 ? `Refreshing ${done + 1} of ${total}` : 'Refreshing preview'
+}
+
+// Each marked spark. The new previews show in place, so only what failed gets a notification.
+async function refreshPreviews(sparks: readonly Spark[]): Promise<void> {
+  if (refreshing) return
+  const wanted = sparks.filter((item) => originOf(item.url))
+  if (!wanted.length) {
+    notify('No website to take a preview of')
+    return
+  }
+  // The access is asked for by the click that starts it: the menu's, or the question's.
+  let access: Promise<boolean> = Promise.resolve(false)
+  const ask = (): void => {
+    access = browser.permissions.request(ALL_SITES).catch(() => false)
+  }
+  if (wanted.length >= MANY_TABS) {
+    const question = {
+      title: 'Refresh previews',
+      text: `Refresh ${wanted.length} previews? Each page opens in a tab for a few seconds.`,
+      button: 'Refresh',
+      plain: true
+    }
+    if (!(await confirm.ask(question, ask))) return
+  } else ask()
+  if (!(await access)) {
+    notify('Not refreshed: FireDial needs access to the sites to take previews')
+    return
+  }
+  const cancel = new AbortController()
+  refreshing = cancel
+  const chosen = new Map<SparkId, ThumbId>()
+  const images: Record<ThumbId, string> = {}
+  let tried = 0
+  const stopped = (): boolean => cancel.signal.aborted // read anew each time: Cancel comes in between
+  try {
+    for (const item of wanted) {
+      if (stopped()) break
+      showRefresh(tried, wanted.length)
+      const note = wanted.length > 1 ? `Preview ${tried + 1} of ${wanted.length} taken. Close this tab to stop.` : null
+      const src = await capturePage(item.url, cancel, note)
+      if (stopped()) break
+      tried += 1
       if (!src) continue
       const id = newThumbId()
-      chosen.set(spark.id, id)
+      chosen.set(item.id, id)
       images[id] = src
       thumbs.set(id, src)
     }
-    if (chosen.size) {
-      await change(
-        (doc) => {
-          for (const spark of doc.sparks) {
-            const thumb = chosen.get(spark.id)
-            if (thumb && !spark.thumb) spark.thumb = thumb
-          }
-          return undefined
-        },
-        { thumbs: images }
-      )
-    }
   } finally {
-    await dropSiteAccess()
+    refreshCard.hidden = true
+    document.title = pageTitle
+    refreshing = null
   }
+  if (chosen.size) {
+    await change(
+      (doc) => {
+        for (const item of doc.sparks) {
+          const thumb = chosen.get(item.id)
+          if (thumb) item.thumb = thumb
+        }
+        return undefined
+      },
+      { thumbs: images }
+    )
+  }
+  // Cancelled ones aren't failures: the card going away says enough.
+  if (chosen.size < tried) notify(chosen.size ? `Refreshed ${chosen.size} of ${plural(tried, 'preview')}` : 'No preview could be taken')
 }
 
 // Labels for every marked spark: add some, or remove some.
@@ -2204,7 +2470,7 @@ async function openLabelModal(): Promise<void> {
 
 // Editing a view's filter: it starts with all sparks or none, includes the sparks with some
 // labels and excludes those with others. The grid shows the result while the dialog is open.
-const ruleModal = new Modal($('#ruleModal', HTMLDialogElement), 'Edit')
+const ruleModal = new Modal($('#ruleModal', HTMLDialogElement), 'Edit view')
 const ruleAll = html('#ruleAll')
 // From all sparks the labels narrow the view down (Require), from none they add to it (Include).
 const INCLUDE_WORDS = {

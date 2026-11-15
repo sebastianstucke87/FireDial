@@ -1713,6 +1713,10 @@ body.editing .Sparks .Spark {
   pointer-events: none;
 }
 
+.Drop__hint .Button {
+  pointer-events: auto;
+}
+
 .Drop--empty .Letter {
   display: none;
 }
@@ -2144,4 +2148,32 @@ kbd {
   border-bottom-color: transparent;
   border-radius: 12px 12px 0 0;
   box-shadow: none;
+}
+
+/* Previews being taken: stays until done, where the notifications appear */
+.RefreshCard {
+  position: fixed;
+  right: var(--firedial-toast-right, 16px);
+  bottom: var(--firedial-toast-bottom, 16px);
+  z-index: 45;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 12px;
+  align-items: center;
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+}
+
+.RefreshCard progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent-mark);
 }

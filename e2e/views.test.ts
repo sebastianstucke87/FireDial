@@ -114,7 +114,7 @@ test('a spark added in a view carries its label, and Unlabeled has the others', 
 
 test('the spark dialog adds labels as chips, split by commas, as written', async () => {
   await js("document.querySelector('#sparks .Spark[data-id] .EditSpark').click()")
-  await until('Edit', async () => (await openDialogs()).join() === 'Edit')
+  await until('Edit', async () => (await openDialogs()).join() === 'Edit spark')
   await driver.findElement(By.css('#sparkLabels input')).click()
   assert.deepEqual(await suggestions('#sparkLabels'), ['Work'], 'the known labels, before typing')
   await press('Trip to Rome, news', Key.ENTER)
@@ -132,7 +132,7 @@ test('the spark dialog adds labels as chips, split by commas, as written', async
 
 test('a new spark in the dialog starts with the open view as its label', async () => {
   await showView('Work')
-  await contextMenu('#main', 'New spark')
+  await contextMenu('#main', 'Add spark')
   await until('Add spark', async () => (await openDialogs()).join() === 'Add spark')
   assert.deepEqual(await js("return [...document.querySelectorAll('#sparkLabels .Chip')].map((chip) => chip.dataset.label)"), ['Work'])
   await press(Key.ESCAPE)
@@ -178,7 +178,7 @@ test("a view's filter shows sparks by their labels, the grid follows while editi
   await addView('Homeoffice')
   assert.equal(await sparkCount(), 0)
   await contextMenu('#main', 'Edit view')
-  await until('the filter', async () => (await openDialogs()).join() === 'Edit')
+  await until('the filter', async () => (await openDialogs()).join() === 'Edit view')
   await driver.findElement(By.css('#ruleInclude input')).click()
   assert.deepEqual(await suggested('#ruleInclude'), ['Trip to Rome 1', 'web 2', 'Work 1'], 'each label but its own, with its count')
   await pick('#ruleInclude', 'web')
@@ -197,8 +197,8 @@ test("a view's filter shows sparks by their labels, the grid follows while editi
   await until('web alone', async () => (await sparkTitles()).join() === 'beta.example')
   await js("document.querySelector('#ruleModal [data-close]').click()")
   await until('the grid back', async () => (await sparkCount()) === 0)
-  await contextMenu(await row('Homeoffice'), 'Edit')
-  await until('the filter', async () => (await openDialogs()).join() === 'Edit')
+  await contextMenu(await row('Homeoffice'), 'Edit view')
+  await until('the filter', async () => (await openDialogs()).join() === 'Edit view')
   assert.deepEqual(await js("return [...document.querySelectorAll('#ruleModal .Chip')].length"), 0, 'Cancel kept nothing')
   await pick('#ruleInclude', 'web')
   await pick('#ruleExclude', 'Work')
@@ -243,8 +243,8 @@ test('Remove from a view takes its label, and says what its filter still shows',
   assert.ok(await noNotification(), 'the grid shows it')
   await click('#undo')
   await until('back in Work', async () => (await sparkCount()) === 1)
-  await contextMenu(await row('Work'), 'Edit')
-  await until('the filter', async () => (await openDialogs()).join() === 'Edit')
+  await contextMenu(await row('Work'), 'Edit view')
+  await until('the filter', async () => (await openDialogs()).join() === 'Edit view')
   await pick('#ruleInclude', 'web')
   await click('#ruleModal .Button--primary')
   await until('web in Work, by name', async () => (await sparkTitles()).join() === 'beta.example,gamma.example')
