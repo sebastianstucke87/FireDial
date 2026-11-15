@@ -37,8 +37,8 @@ export function ago(at: number, now = Date.now()): string {
 export function statusText(state: SyncState, now = Date.now()): string {
   if (state.status === 'offline') return 'Offline · retrying'
   if (state.status === 'signin') return 'Paused · sign in again'
-  if (state.status === 'syncing' || !state.last) return 'Syncing…'
-  return `Synced ${ago(state.last.at, now)}`
+  if (state.status === 'syncing' || !state.lastPull) return 'Syncing…'
+  return `Synced ${ago(state.lastPull, now)}` // the last time Drive and this browser were found the same
 }
 
 let syncing = false // sync is on: replacing everything here replaces it in the other browsers too

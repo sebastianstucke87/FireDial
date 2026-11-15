@@ -15,7 +15,7 @@ test('how long ago, in the largest whole unit', () => {
 })
 
 test('the status line', () => {
-  const state = parseSyncState({ on: true, status: 'ok', last: { device: 'Chrome on Windows', at: NOW - 5 * 60_000 } })
+  const state = parseSyncState({ on: true, status: 'ok', lastPull: NOW - 5 * 60_000, last: { device: 'Chrome on Windows', at: NOW - 60 * 60_000 } })
   assert.equal(statusText(state, NOW), 'Synced 5 min ago')
   assert.equal(statusText({ ...state, status: 'offline' }, NOW), 'Offline · retrying')
   assert.equal(statusText({ ...state, status: 'signin' }, NOW), 'Paused · sign in again')
