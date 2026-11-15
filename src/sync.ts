@@ -226,7 +226,7 @@ export class Sync {
     })
   }
 
-  // Everything FireDial put on Drive goes, and sync stops.
+  // What sync put on Drive goes (backups in the FireDial folder stay), and sync stops.
   deleteFromDrive(): Promise<void> {
     return this.serial(async () => {
       const ids = (await this.drive.list()).map((file) => file.id)
