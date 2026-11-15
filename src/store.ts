@@ -285,10 +285,23 @@ export class Store {
       const state = await this.read()
       const { thumbIndex } = await this.kv.get('thumbIndex')
       const doc: Doc = { views: [], sparks: [], prefs: data.prefs, nextViewId: state.doc.nextViewId, nextSparkId: state.doc.nextSparkId }
+      const oldThumbs = parseThumbIndex(thumbIndex)
+      // An image already here keeps its id, so sync doesn't move it again.
+      const known = new Map<string, ThumbId>()
+      for (let start = 0; start < oldThumbs.length; start += THUMB_CHUNK) {
+        const part = oldThumbs.slice(start, start + THUMB_CHUNK)
+        const found = await this.kv.get(part.map(thumbKey))
+        for (const id of part) {
+          const src = found[thumbKey(id)]
+          if (typeof src === 'string' && !known.has(src)) known.set(src, id)
+        }
+      }
+      const kept = new Set(known.values())
       const thumbs = new Map<ThumbId, string>()
       const sparkIds = new Map<number, SparkId>()
       for (const spark of data.sparks) {
-        const thumb = spark.src ? newThumbId() : null
+        const same = known.get(spark.src)
+        const thumb = spark.src ? (same && !thumbs.has(same) ? same : newThumbId()) : null
         if (thumb) thumbs.set(thumb, spark.src)
         sparkIds.set(spark.key, allocSpark(doc, { title: spark.title, url: spark.url, thumb, labels: spark.labels }).id)
       }
@@ -299,13 +312,13 @@ export class Store {
       }
       canonicalize(doc) // a title twice: the first one stays; All and Unlabeled get their own rules
       checkLimits(doc)
-      const entries = [...thumbs]
+      const entries = [...thumbs].filter(([id]) => !kept.has(id))
       for (let start = 0; start < entries.length; start += THUMB_CHUNK) {
         await this.kv.set(Object.fromEntries(entries.slice(start, start + THUMB_CHUNK).map(([id, src]) => [thumbKey(id), src])))
       }
       const history = { first: 0, cursor: 0, end: 0 }
       await this.kv.set({ ...docItems(doc), rev: state.rev + 1, history, thumbIndex: [...thumbs.keys()] })
-      await this.kv.remove(['thumbColors', ...stepKeys(state.history.first, state.history.end), ...parseThumbIndex(thumbIndex).map(thumbKey)])
+      await this.kv.remove(['thumbColors', ...stepKeys(state.history.first, state.history.end), ...oldThumbs.filter((id) => !thumbs.has(id)).map(thumbKey)])
       this.adopt({ doc, rev: state.rev + 1, history })
       return doc.views.find((view) => view.kind === 'all')?.id ?? ViewId.parse(0)
     })
