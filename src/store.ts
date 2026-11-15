@@ -287,21 +287,12 @@ export class Store {
       const doc: Doc = { views: [], sparks: [], prefs: data.prefs, nextViewId: state.doc.nextViewId, nextSparkId: state.doc.nextSparkId }
       const oldThumbs = parseThumbIndex(thumbIndex)
       // An image already here keeps its id, so sync doesn't move it again.
-      const known = new Map<string, ThumbId>()
-      for (let start = 0; start < oldThumbs.length; start += THUMB_CHUNK) {
-        const part = oldThumbs.slice(start, start + THUMB_CHUNK)
-        const found = await this.kv.get(part.map(thumbKey))
-        for (const id of part) {
-          const src = found[thumbKey(id)]
-          if (typeof src === 'string' && !known.has(src)) known.set(src, id)
-        }
-      }
-      const kept = new Set(known.values())
+      const known = await this.imagesById(oldThumbs)
+      const kept = new Set([...known.values()].flat())
       const thumbs = new Map<ThumbId, string>()
       const sparkIds = new Map<number, SparkId>()
       for (const spark of data.sparks) {
-        const same = known.get(spark.src)
-        const thumb = spark.src ? (same && !thumbs.has(same) ? same : newThumbId()) : null
+        const thumb = spark.src ? (known.get(spark.src)?.shift() ?? newThumbId()) : null
         if (thumb) thumbs.set(thumb, spark.src)
         sparkIds.set(spark.key, allocSpark(doc, { title: spark.title, url: spark.url, thumb, labels: spark.labels }).id)
       }
@@ -324,7 +315,27 @@ export class Store {
     })
   }
 
-  // The images stored here.
+  // The images stored here, each with its ids: one image may show on several sparks.
+  private async imagesById(ids: readonly ThumbId[]): Promise<Map<string, ThumbId[]>> {
+    const known = new Map<string, ThumbId[]>()
+    for (let start = 0; start < ids.length; start += THUMB_CHUNK) {
+      const part = ids.slice(start, start + THUMB_CHUNK)
+      const found = await this.kv.get(part.map(thumbKey))
+      for (const id of part) {
+        const src = found[thumbKey(id)]
+        if (typeof src === 'string') known.set(src, [...(known.get(src) ?? []), id])
+      }
+    }
+    return known
+  }
+
+  // The images stored here, as they are: an import leaves these as they are, so they keep their id.
+  async images(): Promise<Set<string>> {
+    const { thumbIndex } = await this.kv.get('thumbIndex')
+    return new Set((await this.imagesById(parseThumbIndex(thumbIndex))).keys())
+  }
+
+  // The ids of the images stored here.
   async thumbIds(): Promise<Set<ThumbId>> {
     const { thumbIndex } = await this.kv.get('thumbIndex')
     return new Set(parseThumbIndex(thumbIndex))

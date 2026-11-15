@@ -1287,8 +1287,10 @@ async function importFile(file: File): Promise<string> {
   await autoBackup('imported')
   let done = 0
   const sparks = []
+  const stored = await store.images() // as they are: shrunk, they'd count as new and sync again
   for (const spark of backup.sparks) {
-    sparks.push({ ...spark, src: spark.src.startsWith('data:') ? await shrinkImage(spark.src) : spark.src })
+    const shrink = spark.src.startsWith('data:') && !stored.has(spark.src)
+    sparks.push({ ...spark, src: shrink ? await shrinkImage(spark.src) : spark.src })
     showImport(`${++done} of ${plural(backup.sparks.length, 'spark')}`, done / backup.sparks.length)
   }
   showImport('Saving')

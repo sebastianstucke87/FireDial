@@ -577,28 +577,28 @@ test('import: an image already here keeps its id, so it doesn’t move again', a
   const kv = memory()
   const [store] = await tabs(1, kv)
   assert.ok(store)
-  const [same, gone] = [newThumbId(), newThumbId()]
+  const [same, twice, gone] = [newThumbId(), newThumbId(), newThumbId()]
   await store.commit(
     (doc) => {
       addSpark(doc, 'same').thumb = same
+      addSpark(doc, 'twice').thumb = twice
       addSpark(doc, 'gone').thumb = gone
       return undefined
     },
-    { thumbs: { [same]: 'data:same', [gone]: 'data:gone' } }
+    { thumbs: { [same]: 'data:same', [twice]: 'data:same', [gone]: 'data:gone' } }
   )
   const rule = { all: false, include: [], exclude: [] }
   const spark = (key: number, src: string) => ({ key, title: toLabel(`s${key}`), url: url('https://s.example/'), src, labels: [] })
   await store.replaceAll({
     views: [{ kind: 'all', title: LabelName.parse('All'), sort: 'name', rule, order: [] }],
-    sparks: [spark(1, 'data:same'), spark(2, 'data:same'), spark(3, 'data:new')],
+    sparks: [spark(1, 'data:same'), spark(2, 'data:same'), spark(3, 'data:same'), spark(4, 'data:new')],
     prefs: store.doc.prefs
   })
   const ids = store.doc.sparks.map((one) => one.thumb)
-  assert.equal(ids[0], same)
-  assert.notEqual(ids[1], same, 'one id per spark')
-  assert.equal(new Set(ids).size, 3)
+  assert.deepEqual(ids.slice(0, 2), [same, twice], 'an image on two sparks keeps both ids')
+  assert.equal(new Set(ids).size, 4, 'one id per spark')
   const images = await store.thumbs(ids.flatMap((id) => (id ? [id] : [])))
-  assert.deepEqual([...images.values()], ['data:same', 'data:same', 'data:new'])
+  assert.deepEqual([...images.values()], ['data:same', 'data:same', 'data:same', 'data:new'])
   assert.ok(!kv.data.has(thumbKey(gone)))
 })
 

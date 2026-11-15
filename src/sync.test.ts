@@ -334,3 +334,32 @@ test('undo after a pull with a change of its own takes back what came in', async
   await chrome.sync.run(true)
   assert.deepEqual(titles(chrome.store), ['a', 'github'])
 })
+
+test('re-importing the same images moves no previews, an image on several sparks neither', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  for (let index = 0; index < 12; index++) await add(a.store, `s${index}`, `data:image/png;base64,${index % 6}`)
+  await a.sync.start('Firefox on Windows')
+  const b = await browserWith(drive)
+  await b.sync.start('Chrome on Windows')
+  const images = await a.store.thumbs(a.store.doc.sparks.flatMap((spark) => spark.thumb ?? []))
+  const sparks = a.store.doc.sparks.map((spark, key) => ({
+    key,
+    title: spark.title,
+    url: spark.url,
+    src: spark.thumb ? (images.get(spark.thumb) ?? '') : '',
+    labels: []
+  }))
+  await a.store.replaceAll({ views: [], sparks, prefs: a.store.doc.prefs })
+  drive.creates = []
+  await a.sync.run(false)
+  assert.equal(drive.creates.filter((name) => name.startsWith('thumb-')).length, 0, 'nothing uploaded')
+  const read = drive.read.bind(drive)
+  let reads = 0
+  drive.read = (id) => {
+    reads++
+    return read(id)
+  }
+  await b.sync.run(true)
+  assert.equal(reads, 1, 'only state.json')
+})
