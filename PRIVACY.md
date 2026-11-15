@@ -43,7 +43,7 @@ Anything else claiming to be FireDial is fake; report it to the organization tha
 
 ## Contact
 
-Questions: [open an issue](https://github.com/sebastianstucke87/FireDial/issues). Privately: [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new).
+Contact: [Open an issue](https://github.com/sebastianstucke87/FireDial/issues) or [report a vulnerability](https://github.com/sebastianstucke87/FireDial/security/advisories/new).
 
 ## Changes
 
