@@ -15,7 +15,8 @@ export interface Drive {
   read(id: string): Promise<string>
   create(name: string, content: string, props?: Record<string, string>): Promise<DriveFile>
   update(id: string, content: string, props?: Record<string, string>): Promise<void>
-  remove(id: string): Promise<void>
+  // Files gone already count as removed. progress hears how many are done so far.
+  remove(ids: readonly string[], progress?: (done: number) => Promise<void>): Promise<void>
   email(): Promise<string>
 }
 
@@ -31,6 +32,8 @@ export interface Auth {
 
 const API = 'https://www.googleapis.com/drive/v3'
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3'
+const BATCH = 'https://www.googleapis.com/batch/drive/v3'
+const BATCH_SIZE = 100 // requests in one batch, Google's most
 const FIELDS = 'id,name,appProperties'
 
 const RawFile = z.object({ id: z.string(), name: z.catch(z.string(), ''), appProperties: z.catch(z.record(z.string(), z.string()), {}) })
@@ -114,12 +117,33 @@ export class GoogleDrive implements Drive {
     await this.send(`${UPLOAD}/files/${encodeURIComponent(id)}?uploadType=multipart&fields=id`, { method: 'PATCH', body }, type)
   }
 
-  async remove(id: string): Promise<void> {
-    try {
-      await this.send(`${API}/files/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    } catch (error) {
-      if (!(error instanceof Error && error.message.startsWith('Google Drive: 404'))) throw error // gone already
+  // In batches: one request deletes up to BATCH_SIZE files, each would take a second on its own.
+  async remove(ids: readonly string[], progress?: (done: number) => Promise<void>): Promise<void> {
+    for (let start = 0; start < ids.length; start += BATCH_SIZE) {
+      const part = ids.slice(start, start + BATCH_SIZE)
+      let statuses = await this.deleteBatch(part)
+      if (statuses.includes(401)) {
+        await this.auth.renew()
+        statuses = await this.deleteBatch(part)
+      }
+      if (statuses.includes(401)) throw new SignInError('Google sign-in ran out')
+      if (statuses.some((status) => status === 429 || status >= 500)) throw new OfflineError('Google Drive: busy')
+      const failed = statuses.find((status) => status >= 300 && status !== 404)
+      if (failed) throw new Error(`Google Drive: ${failed} deleting files`)
+      await progress?.(start + part.length)
     }
+  }
+
+  // The status of each delete.
+  private async deleteBatch(ids: readonly string[]): Promise<number[]> {
+    const boundary = `firedial-${crypto.randomUUID()}`
+    const CRLF = '\r\n'
+    const parts = ids.map((id, index) =>
+      [`--${boundary}`, 'Content-Type: application/http', `Content-ID: <${index}>`, '', `DELETE /drive/v3/files/${encodeURIComponent(id)}`, ''].join(CRLF)
+    )
+    const body = `${parts.join('')}--${boundary}--${CRLF}`
+    const text = await (await this.send(BATCH, { method: 'POST', body }, `multipart/mixed; boundary=${boundary}`)).text()
+    return [...text.matchAll(/^HTTP\/1\.1 (\d{3})/gm)].map((match) => Number(match[1]))
   }
 
   async email(): Promise<string> {

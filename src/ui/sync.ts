@@ -40,15 +40,19 @@ export function statusText(state: SyncState, now = Date.now()): string {
 
 const send = (command: SyncCommand): Promise<unknown> => browser.runtime.sendMessage({ sync: command }).catch(() => undefined)
 
-const Progress = z.catch(z.nullable(z.object({ done: z.number(), total: z.number() })), null)
+const Progress = z.catch(z.nullable(z.object({ done: z.number(), total: z.number(), deleting: z.catch(z.boolean(), false) })), null)
 
-// The card of Refresh previews, while many previews move: the first sync.
+// The card of Refresh previews, while many previews move (the first sync) or go (Delete from Drive).
+// Deleting goes a hundred at a time: until the first hundred are gone, the bar just runs.
 async function showProgress(): Promise<void> {
   const progress = Progress.parse((await browserKeyValue.get('syncProgress'))['syncProgress'] ?? null)
   html('#syncCard').hidden = !progress
   if (!progress) return
-  html('#syncCardText').textContent = `Syncing previews: ${progress.done} of ${progress.total}`
-  $('#syncBar', HTMLProgressElement).value = progress.done / progress.total
+  const { done, total, deleting } = progress
+  html('#syncCardText').textContent = deleting ? 'Deleting from Drive' : `Syncing previews: ${done} of ${total}`
+  const bar = $('#syncBar', HTMLProgressElement)
+  if (deleting && !done) bar.removeAttribute('value')
+  else bar.value = done / total
 }
 
 export function initSync(confirm: Confirm): void {

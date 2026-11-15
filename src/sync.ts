@@ -229,7 +229,17 @@ export class Sync {
   // Everything FireDial put on Drive goes, and sync stops.
   deleteFromDrive(): Promise<void> {
     return this.serial(async () => {
-      await inParallel(await this.drive.list(), (file) => this.drive.remove(file.id))
+      const ids = (await this.drive.list()).map((file) => file.id)
+      const total = ids.length
+      const shown = total >= SHOWN_FROM
+      try {
+        if (shown) await this.kv.set({ syncProgress: { done: 0, total, deleting: true } })
+        await this.drive.remove(ids, async (done) => {
+          if (shown) await this.kv.set({ syncProgress: { done, total, deleting: true } })
+        })
+      } finally {
+        if (shown) await this.kv.remove('syncProgress')
+      }
       await this.kv.remove('syncBase')
       await this.kv.set({ sync: parseSyncState({}) })
     })
@@ -335,6 +345,6 @@ export class Sync {
     // Images no doc on Drive refers to any more.
     const keep = new Set([...wanted].map(thumbName))
     const unused = files.filter(({ name }) => name.startsWith(THUMB_PREFIX) && !keep.has(name))
-    await inParallel(unused, (file) => this.drive.remove(file.id))
+    await this.drive.remove(unused.map((file) => file.id))
   }
 }

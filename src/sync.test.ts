@@ -73,10 +73,10 @@ class FakeDrive implements Drive {
     return Promise.resolve()
   }
 
-  remove(id: string): Promise<void> {
+  async remove(ids: readonly string[], progress?: (done: number) => Promise<void>): Promise<void> {
     this.check()
-    this.files.delete(id)
-    return Promise.resolve()
+    for (const id of ids) this.files.delete(id)
+    await progress?.(ids.length)
   }
 
   email(): Promise<string> {
