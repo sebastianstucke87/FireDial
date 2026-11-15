@@ -43,6 +43,17 @@ export async function signIn(interactive: boolean, hint = ''): Promise<string> {
 
 export const forgetToken = (): Promise<void> => browser.storage.session.remove(TOKEN)
 
+// Takes back FireDial's access to Drive, so it leaves the user's list of connected apps. Google's
+// answer can't be read from here (no CORS), and needn't be: the request alone revokes.
+export async function revokeAccess(): Promise<void> {
+  const stored: Record<string, unknown> = await browser.storage.session.get(TOKEN)
+  const token = stored[TOKEN]
+  await forgetToken()
+  if (typeof token !== 'string') return
+  const body = new URLSearchParams({ token })
+  await fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', mode: 'no-cors', body }).catch(() => undefined)
+}
+
 export function googleAuth(hint: () => Promise<string>): Auth {
   return {
     async token() {

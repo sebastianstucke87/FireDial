@@ -35,7 +35,7 @@ FireDial contains no third-party tracking or data collection. The libraries it b
 
 Uninstalling FireDial deletes its extension storage. Your browser bookmarks and downloaded backup files stay until you delete them from your device.
 
-If you used Sync, "Delete from Drive" in FireDial's settings deletes everything FireDial put in your Google Drive. You can also remove it in Google Drive under Settings → Manage apps → FireDial → Delete hidden app data.
+If you used Sync, "Delete from Drive" in FireDial's settings deletes everything FireDial put in your Google Drive and removes FireDial's access to it. You can also remove it in Google Drive under Settings → Manage apps → FireDial → Delete hidden app data.
 
 ## Official sources
 

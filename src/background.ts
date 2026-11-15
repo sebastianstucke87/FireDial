@@ -13,7 +13,7 @@ import * as z from 'zod/mini'
 import { parseBackup } from './backup.ts'
 import { BookmarkSync, hasBookmarkFolder, samePage } from './bookmarks.ts'
 import { GoogleDrive } from './drive.ts'
-import { deviceName, forgetToken, googleAuth, SYNC_DATA } from './google.ts'
+import { deviceName, forgetToken, googleAuth, revokeAccess, SYNC_DATA } from './google.ts'
 import { blobToDataUrl, faviconPath, isStoredImage } from './images.ts'
 import { addTo, allocSpark, allocView, isVanilla, newThumbId, nextViewName, SparkId, toLabel, toSparkUrl, ViewId } from './model.ts'
 import type { Doc } from './model.ts'
@@ -188,7 +188,7 @@ async function syncCommand(command: SyncCommand): Promise<void> {
   } else {
     await (command === 'stop' ? driveSync.stop() : driveSync.deleteFromDrive())
     if ((await driveSync.state()).on) return
-    await forgetToken()
+    await (command === 'delete' ? revokeAccess() : forgetToken())
     if (!IS_CHROME) await browser.permissions.remove({ data_collection: SYNC_DATA }).catch(() => false)
   }
 }

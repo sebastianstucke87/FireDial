@@ -17,7 +17,7 @@ const DAY = 24 * HOUR
 
 const DELETE_FROM_DRIVE = {
   title: 'Delete from Drive',
-  text: 'Delete from Drive. This will delete all FireDial sparks, views and previews from your Google Drive and stop sync. This browser keeps them.',
+  text: 'Delete from Drive. This will delete all FireDial sparks, views and previews from your Google Drive, stop sync and remove FireDial’s access to Drive. This browser keeps them.',
   button: 'Delete from Drive'
 }
 
