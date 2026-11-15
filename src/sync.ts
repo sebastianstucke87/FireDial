@@ -37,6 +37,7 @@ const SyncStateSchema = z.object({
   version: z.catch(z.number(), 0), // the version on Drive the base came from
   last: z.catch(z.nullable(Stamp), null), // the last change on Drive: which browser, when
   lastPull: z.catch(z.number(), 0),
+  problem: z.catch(z.string(), ''), // why it's offline, for the console and bug reports
   // First sync with sparks on both sides: which to keep is up to the user.
   choice: z.catch(z.nullable(z.object({ ...Stamp.shape, sparks: z.catch(z.number(), 0), local: z.catch(z.number(), 0) })), null)
 })
@@ -155,10 +156,11 @@ export class Sync {
         await task()
       } catch (error) {
         if (!(await this.state()).on) return
-        if (error instanceof SignInError) await this.update({ status: 'signin' })
+        if (error instanceof SignInError) await this.update({ status: 'signin', problem: String(error) })
         else {
-          if (!(error instanceof OfflineError)) console.error('FireDial sync:', error)
-          await this.update({ status: 'offline' })
+          if (error instanceof OfflineError) console.warn('FireDial sync:', error, error.cause)
+          else console.error('FireDial sync:', error)
+          await this.update({ status: 'offline', problem: String(error instanceof OfflineError ? (error.cause ?? error) : error) })
         }
       }
     })

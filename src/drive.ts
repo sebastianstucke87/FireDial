@@ -60,9 +60,9 @@ function multipart(metadata: object, content: string): { body: string; type: str
 
 export class GoogleDrive implements Drive {
   private readonly auth: Auth
-  private readonly fetch: typeof fetch
+  private readonly fetch: typeof fetch // called as a method, so not the browser's own fetch: that needs its window
 
-  constructor(auth: Auth, fetcher: typeof fetch = fetch) {
+  constructor(auth: Auth, fetcher: typeof fetch = (input, init) => fetch(input, init)) {
     this.auth = auth
     this.fetch = fetcher
   }
@@ -71,8 +71,8 @@ export class GoogleDrive implements Drive {
     const attempt = async (token: string): Promise<Response> => {
       try {
         return await this.fetch(url, { ...init, headers: { ...(type ? { 'Content-Type': type } : {}), Authorization: `Bearer ${token}` } })
-      } catch {
-        throw new OfflineError('No connection to Google Drive')
+      } catch (error) {
+        throw new OfflineError('No connection to Google Drive', { cause: error })
       }
     }
     let response = await attempt(await this.auth.token())

@@ -1464,6 +1464,10 @@ body.editing .Sparks .Spark {
   gap: 8px;
 }
 
+.Buttons--stack {
+  grid-auto-flow: row; /* labels too long for one row */
+}
+
 .Buttons .Button {
   padding: 0 8px; /* room for three labels in the About width */
   white-space: nowrap;
