@@ -68,7 +68,7 @@ import { Dropdown } from './ui/dropdown.ts'
 import type { Choice } from './ui/dropdown.ts'
 import { editable } from './ui/editable.ts'
 import { Modal } from './ui/modal.ts'
-import { acrossBrowsers, initSync } from './ui/sync.ts'
+import { acrossBrowsers, initSync, saveToDrive } from './ui/sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 
 const THUMB_MAX_WIDTH = 640
@@ -1213,28 +1213,38 @@ const importDetail = html('#importDetail')
 const importDone = html('#importDone')
 
 // Resolves once the file is saved.
-async function writeBackup(auto: boolean): Promise<void> {
+async function writeBackup(auto: boolean): Promise<{ name: string; blob: Blob }> {
   const ids = store.doc.sparks.map((spark) => spark.thumb).filter((thumb) => thumb !== null)
   const blob = new Blob(exportParts(store.doc, await store.thumbs(ids)), { type: 'application/json' })
   if (blob.size > LIMITS.backupBytes) throw new LimitError('The backup would be larger than 1 GB')
+  const name = backupName(new Date(), auto)
   const url = URL.createObjectURL(blob)
   try {
-    await saveFile(browser.downloads, url, backupName(new Date(), auto), auto)
+    await saveFile(browser.downloads, url, name, auto)
   } finally {
     URL.revokeObjectURL(url)
   }
+  return { name, blob }
 }
 
 // What may not happen without a backup of what it replaces. outcome: what didn't happen, if that fails.
 // False when there was nothing to keep, so no file.
+// With sync on, a copy goes to the FireDial folder in Google Drive too: the change reaches every
+// browser, so the downloads folder of this one may not be where it's missed. The file here is
+// what counts: without Drive, the change still goes ahead.
 async function autoBackup(outcome: string): Promise<boolean> {
   if (isVanilla(store.doc)) return false
+  let backup: { name: string; blob: Blob }
   try {
-    await writeBackup(true)
-    return true
+    backup = await writeBackup(true)
   } catch (error) {
     throw new Error(`The backup failed, so nothing was ${outcome}: ${errorText(error)}`, { cause: error })
   }
+  await saveToDrive(backup.name, backup.blob).catch((error: unknown) => {
+    console.warn('FireDial backup to Drive:', error)
+    notify('Backup not saved to Google Drive')
+  })
+  return true
 }
 
 async function exportData(): Promise<void> {

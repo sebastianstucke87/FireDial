@@ -32,6 +32,7 @@ export interface Auth {
 
 const API = 'https://www.googleapis.com/drive/v3'
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3'
+const FOLDER = 'application/vnd.google-apps.folder'
 const BATCH = 'https://www.googleapis.com/batch/drive/v3'
 const BATCH_SIZE = 100 // requests in one batch, Google's most
 const FIELDS = 'id,name,appProperties'
@@ -70,10 +71,10 @@ export class GoogleDrive implements Drive {
     this.fetch = fetcher
   }
 
-  private async send(url: string, init: RequestInit = {}, type = ''): Promise<Response> {
+  private async send(url: string, init: RequestInit = {}, headers: Record<string, string> = {}): Promise<Response> {
     const attempt = async (token: string): Promise<Response> => {
       try {
-        return await this.fetch(url, { ...init, headers: { ...(type ? { 'Content-Type': type } : {}), Authorization: `Bearer ${token}` } })
+        return await this.fetch(url, { ...init, headers: { ...headers, Authorization: `Bearer ${token}` } })
       } catch (error) {
         throw new OfflineError('No connection to Google Drive', { cause: error })
       }
@@ -108,13 +109,13 @@ export class GoogleDrive implements Drive {
 
   async create(name: string, content: string, props: Record<string, string> = {}): Promise<DriveFile> {
     const { body, type } = multipart({ name, parents: ['appDataFolder'], appProperties: props }, content)
-    const response = await this.send(`${UPLOAD}/files?uploadType=multipart&fields=${FIELDS}`, { method: 'POST', body }, type)
+    const response = await this.send(`${UPLOAD}/files?uploadType=multipart&fields=${FIELDS}`, { method: 'POST', body }, { 'Content-Type': type })
     return toFile(RawFile.parse(await response.json()))
   }
 
   async update(id: string, content: string, props: Record<string, string> = {}): Promise<void> {
     const { body, type } = multipart({ appProperties: props }, content)
-    await this.send(`${UPLOAD}/files/${encodeURIComponent(id)}?uploadType=multipart&fields=id`, { method: 'PATCH', body }, type)
+    await this.send(`${UPLOAD}/files/${encodeURIComponent(id)}?uploadType=multipart&fields=id`, { method: 'PATCH', body }, { 'Content-Type': type })
   }
 
   // In batches: one request deletes up to BATCH_SIZE files, each would take a second on its own.
@@ -142,8 +143,39 @@ export class GoogleDrive implements Drive {
       [`--${boundary}`, 'Content-Type: application/http', `Content-ID: <${index}>`, '', `DELETE /drive/v3/files/${encodeURIComponent(id)}`, ''].join(CRLF)
     )
     const body = `${parts.join('')}--${boundary}--${CRLF}`
-    const text = await (await this.send(BATCH, { method: 'POST', body }, `multipart/mixed; boundary=${boundary}`)).text()
+    const text = await (await this.send(BATCH, { method: 'POST', body }, { 'Content-Type': `multipart/mixed; boundary=${boundary}` })).text()
     return [...text.matchAll(/^HTTP\/1\.1 (\d{3})/gm)].map((match) => Number(match[1]))
+  }
+
+  // A folder of that name (FireDial's own, no quotes in it) in the user's own Drive, made by FireDial: the one there, or a new one.
+  // FireDial sees only what it made itself (scope drive.file), so a folder of the user's isn't it.
+  async folder(name: string): Promise<string> {
+    const query = new URLSearchParams({
+      spaces: 'drive',
+      q: `name = '${name}' and mimeType = '${FOLDER}' and trashed = false`,
+      fields: 'files(id,name)'
+    })
+    const [found] = ListPage.parse(await (await this.send(`${API}/files?${query}`)).json()).files
+    if (found) return found.id
+    const body = JSON.stringify({ name, mimeType: FOLDER })
+    return RawFile.parse(await (await this.send(`${API}/files?fields=id,name`, { method: 'POST', body }, { 'Content-Type': 'application/json' })).json()).id
+  }
+
+  // A file the user sees, in that folder. Resumable: one request for the name, one for the content,
+  // which may be bigger than a multipart upload takes (5 MB).
+  async upload(name: string, content: Blob, parent: string): Promise<void> {
+    const body = JSON.stringify({ name, parents: [parent] })
+    const start = await this.send(
+      `${UPLOAD}/files?uploadType=resumable`,
+      { method: 'POST', body },
+      {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': content.type
+      }
+    )
+    const location = start.headers.get('Location')
+    if (!location) throw new Error('Google Drive gave no upload address')
+    await this.send(location, { method: 'PUT', body: content }, { 'Content-Type': content.type })
   }
 
   async email(): Promise<string> {

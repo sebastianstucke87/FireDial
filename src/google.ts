@@ -11,7 +11,8 @@ import { GOOGLE_CLIENT_ID } from './sync-config.ts'
 // What sync sends to Drive, in Firefox's words: sparks are bookmarks, previews show web pages.
 export const SYNC_DATA: browser._manifest.OptionalDataCollectionPermission[] = ['bookmarksInfo', 'websiteContent']
 
-const SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
+// Sync's hidden app folder, and the files FireDial makes in the user's Drive: the backups.
+const SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file'
 const TOKEN = 'syncToken' // in storage.session: gone when the browser closes
 
 function authUrl(interactive: boolean, hint: string): string {

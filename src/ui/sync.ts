@@ -4,7 +4,8 @@
 import * as z from 'zod/mini'
 
 import { IS_CHROME } from '../browser.ts'
-import { SYNC_DATA, signIn } from '../google.ts'
+import { GoogleDrive } from '../drive.ts'
+import { googleAuth, SYNC_DATA, signIn } from '../google.ts'
 import { plural } from '../model.ts'
 import { browserKeyValue } from '../store.ts'
 import { parseSyncState } from '../sync.ts'
@@ -46,6 +47,15 @@ let syncing = false // sync is on: replacing everything here replaces it in the 
 // A question about replacing all sparks, saying so when sync carries it on.
 export const acrossBrowsers = (question: Question): Question =>
   syncing ? { ...question, text: `${question.text} Your other synced browsers follow.` } : question
+
+let account = '' // the Google account sync uses
+
+// A file in the FireDial folder of the user's Drive, when sync is on; nothing otherwise.
+export async function saveToDrive(name: string, content: Blob): Promise<void> {
+  if (!syncing) return
+  const drive = new GoogleDrive(googleAuth(() => Promise.resolve(account)))
+  await drive.upload(name, content, await drive.folder('FireDial'))
+}
 
 const send = (command: SyncCommand): Promise<unknown> => browser.runtime.sendMessage({ sync: command }).catch(() => undefined)
 
@@ -115,6 +125,7 @@ export function initSync(confirm: Confirm, askFromAbout: (question: Question, ru
   async function refresh(): Promise<void> {
     state = parseSyncState((await browserKeyValue.get('sync'))['sync'])
     syncing = state.on
+    account = state.email
     render()
     if (starting && state.status === 'choose') {
       starting = false
