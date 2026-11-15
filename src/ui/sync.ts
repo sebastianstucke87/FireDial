@@ -1,6 +1,8 @@
 // The Sync section in the settings, the first sync's question and the dot on Edit when sync waits
 // for the user. The background does the syncing; this page asks it to and shows its status.
 
+import * as z from 'zod/mini'
+
 import { IS_CHROME } from '../browser.ts'
 import { SYNC_DATA, signIn } from '../google.ts'
 import { plural } from '../model.ts'
@@ -37,6 +39,17 @@ export function statusText(state: SyncState, now = Date.now()): string {
 }
 
 const send = (command: SyncCommand): Promise<unknown> => browser.runtime.sendMessage({ sync: command }).catch(() => undefined)
+
+const Progress = z.catch(z.nullable(z.object({ done: z.number(), total: z.number() })), null)
+
+// The card of Refresh previews, while many previews move: the first sync.
+async function showProgress(): Promise<void> {
+  const progress = Progress.parse((await browserKeyValue.get('syncProgress'))['syncProgress'] ?? null)
+  html('#syncCard').hidden = !progress
+  if (!progress) return
+  html('#syncCardText').textContent = `Syncing previews: ${progress.done} of ${progress.total}`
+  $('#syncBar', HTMLProgressElement).value = progress.done / progress.total
+}
 
 export function initSync(confirm: Confirm): void {
   const modal = new Modal($('#syncModal', HTMLDialogElement), 'Keep which sparks?')
@@ -117,6 +130,7 @@ export function initSync(confirm: Confirm): void {
   })
   browserKeyValue.onChanged((keys) => {
     if (keys.has('sync')) void refresh()
+    if (keys.has('syncProgress')) void showProgress()
   })
   // Newer changes from other browsers come when FireDial is looked at; the background keeps it to
   // one check in a while.
@@ -129,4 +143,5 @@ export function initSync(confirm: Confirm): void {
     if (!on.hidden && document.visibilityState === 'visible') render() // "5 min ago" moves on
   }, MINUTE)
   void refresh().then(pull)
+  void showProgress()
 }

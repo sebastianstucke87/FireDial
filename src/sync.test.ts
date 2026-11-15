@@ -302,3 +302,19 @@ test('rebase gives new ids to sparks made on both sides', () => {
   )
   assert.equal(doc.nextSparkId, 2)
 })
+
+test('many previews: how far it is, while they move', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  for (let index = 0; index < 12; index++) await add(a.store, `s${index}`, `data:image/png;base64,${index}`)
+  const seen: unknown[] = []
+  const set = a.kv.set.bind(a.kv)
+  a.kv.set = (items) => {
+    if ('syncProgress' in items) seen.push(items['syncProgress'])
+    return set(items)
+  }
+  await a.sync.start('Firefox on Windows')
+  assert.deepEqual(seen[0], { done: 0, total: 12 })
+  assert.deepEqual(seen.at(-1), { done: 12, total: 12 })
+  assert.equal(a.kv.data.has('syncProgress'), false)
+})

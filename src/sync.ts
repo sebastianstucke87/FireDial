@@ -21,6 +21,7 @@ import type { KeyValue, Store } from './store.ts'
 const STATE_FILE = 'state.json'
 const THUMB_PREFIX = 'thumb-'
 const ROUNDS = 5 // pull-then-push rounds before giving up until the next change
+const SHOWN_FROM = 10 // previews moving at once before the page shows how far it is
 const PARALLEL = 8 // Drive requests at once: each image waits about a second for Google, not for the line
 
 // Runs task for each item, PARALLEL at a time.
@@ -254,13 +255,31 @@ export class Sync {
     await this.update({ status: 'ok', version: remote.version, last: remote.stamp, lastPull: this.now() })
   }
 
+  // Previews to or from Drive. Many of them take a while (the first sync): FireDial pages show how
+  // far it is from syncProgress.
+  private async transfer<T>(items: readonly T[], task: (item: T) => Promise<void>): Promise<void> {
+    if (items.length < SHOWN_FROM) return inParallel(items, task)
+    let done = 0
+    const total = items.length
+    await this.kv.set({ syncProgress: { done, total } })
+    try {
+      await inParallel(items, async (item) => {
+        await task(item)
+        done += 1
+        await this.kv.set({ syncProgress: { done, total } })
+      })
+    } finally {
+      await this.kv.remove('syncProgress')
+    }
+  }
+
   // false when the store changed meanwhile.
   private async commit(target: Doc, revision: number): Promise<boolean> {
     const have = await this.store.thumbIds()
     const missing = [...thumbsOf(target)].filter((id) => !have.has(id))
     const files = missing.length ? new Map((await this.drive.list()).map((file) => [file.name, file.id])) : new Map<string, string>()
     const thumbs: Record<ThumbId, string> = {}
-    await inParallel(missing, async (id) => {
+    await this.transfer(missing, async (id) => {
       const file = files.get(thumbName(id))
       if (file) thumbs[id] = await this.drive.read(file) // gone from Drive: the spark goes without
     })
@@ -298,7 +317,7 @@ export class Sync {
     const wanted = thumbsOf(local)
     const missing = [...wanted].filter((id) => !names.has(thumbName(id)))
     const images = await this.store.thumbs(missing)
-    await inParallel(
+    await this.transfer(
       [...images].filter(([, src]) => src),
       async ([id, src]) => {
         await this.drive.create(thumbName(id), src)
