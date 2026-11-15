@@ -2661,7 +2661,7 @@ async function init(): Promise<void> {
   if (revealing !== null) revealSpark(revealing)
   store.watch(() => void followStore())
   void loadEngines()
-  initSync(confirm)
+  initSync(confirm, askFromAbout)
 }
 
 void init()

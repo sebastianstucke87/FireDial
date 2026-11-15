@@ -64,7 +64,8 @@ async function showProgress(): Promise<void> {
   else bar.value = done / total
 }
 
-export function initSync(confirm: Confirm): void {
+// askFromAbout: Delete from Drive is in About, whose questions take its place while they're asked.
+export function initSync(confirm: Confirm, askFromAbout: (question: Question, run: () => Promise<void>) => Promise<void>): void {
   const modal = new Modal($('#syncModal', HTMLDialogElement), 'Which sparks to keep?')
   const off = html('#syncOff')
   const on = html('#syncOn')
@@ -85,6 +86,7 @@ export function initSync(confirm: Confirm): void {
     now.hidden = signin
     login.hidden = !signin
     html('#syncEmail').textContent = state.email
+    html('#aboutSync').hidden = !running
     editToggle.classList.toggle('EditToggle--alert', signin)
   }
 
@@ -145,9 +147,10 @@ export function initSync(confirm: Confirm): void {
     stop: async () => {
       if (await confirm.ask(STOP_SYNC)) await send('stop')
     },
-    delete: async () => {
-      if (await confirm.ask(DELETE_FROM_DRIVE)) await send('delete')
-    }
+    delete: () =>
+      askFromAbout(DELETE_FROM_DRIVE, async () => {
+        await send('delete')
+      })
   }
 
   document.addEventListener('click', (event) => {

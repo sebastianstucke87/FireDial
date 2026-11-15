@@ -174,10 +174,6 @@
                 <button type="button" class="Button" data-sync="stop">Stop sync</button>
               </div>
             </div>
-            <div class="Setting">
-              <span class="SyncLabel" id="syncEmail"></span>
-              <button type="button" class="Button Button--warn" data-sync="delete"><svg class="icon"><use href="#i-alert"/></svg>Delete from Drive</button>
-            </div>
           </div>
         </section>
         <section class="Section Section--about">
@@ -264,6 +260,15 @@
           <div class="Setting">
             <div class="Buttons">
               <button type="button" class="Button" data-action="import-bookmarks"><svg class="icon"><use href="#i-globe"/></svg><span id="browserName">Firefox</span> bookmarks</button>
+            </div>
+          </div>
+        </section>
+        <section class="Section" id="aboutSync" hidden>
+          <h3 class="Section__head"><svg class="icon"><use href="#i-sync"/></svg>Sync</h3>
+          <div class="Setting">
+            <span class="SyncLabel" id="syncEmail"></span>
+            <div class="Buttons">
+              <button type="button" class="Button Button--warn" data-sync="delete"><svg class="icon"><use href="#i-alert"/></svg>Delete from Drive</button>
             </div>
           </div>
         </section>
