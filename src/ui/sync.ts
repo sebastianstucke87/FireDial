@@ -38,7 +38,7 @@ export function statusText(state: SyncState, now = Date.now()): string {
   if (state.status === 'offline') return 'Offline · retrying'
   if (state.status === 'signin') return 'Paused · sign in again'
   if (state.status === 'syncing' || !state.last) return 'Syncing…'
-  return `Synced ${ago(state.last.at, now)} · ${state.last.device}`
+  return `Synced ${ago(state.last.at, now)}`
 }
 
 let syncing = false // sync is on: replacing everything here replaces it in the other browsers too
