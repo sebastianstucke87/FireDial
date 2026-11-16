@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import * as z from 'zod/mini'
 
 import type { Drive, DriveFile } from './drive.ts'
 import { OfflineError, SignInError } from './drive.ts'
-import { allocSpark, emptyDoc, newThumbId, SparkUrl, toLabel } from './model.ts'
+import { allocSpark, allocView, emptyDoc, LabelName, newThumbId, SparkId, SparkUrl, toLabel } from './model.ts'
 import type { Doc } from './model.ts'
 import { Store, thumbKey } from './store.ts'
 import type { KeyValue, Lock } from './store.ts'
-import { rebase, Sync } from './sync.ts'
+import { parseSyncState, rebase, Sync, SyncCommand } from './sync.ts'
 
 function memory(): KeyValue & { data: Map<string, unknown> } {
   const data = new Map<string, unknown>()
@@ -362,4 +363,389 @@ test('re-importing the same images moves no previews, an image on several sparks
   }
   await b.sync.run(true)
   assert.equal(reads, 1, 'only state.json')
+})
+
+// Every sync state and progress written, in order.
+function written(browser: Browser, key: 'sync' | 'syncProgress'): unknown[] {
+  const seen: unknown[] = []
+  const set = browser.kv.set.bind(browser.kv)
+  browser.kv.set = (items) => {
+    if (key in items) seen.push(structuredClone(items[key]))
+    return set(items)
+  }
+  return seen
+}
+const statuses = (seen: unknown[]): unknown[] => seen.map((state) => parseSyncState(state).status)
+
+test('what a page may ask the background', () => {
+  assert.deepEqual(SyncCommand.options, ['start', 'pull', 'now', 'drive', 'local', 'stop', 'delete'])
+})
+
+test('a sync state from nothing, or from something broken, is off', () => {
+  const off = { on: false, status: 'off', email: '', device: '', version: 0, last: null, lastPull: 0, problem: '', choice: null }
+  assert.deepEqual(parseSyncState(undefined), off)
+  assert.deepEqual(parseSyncState({ on: 1, status: 'x', email: 2, device: 3, version: 'a', last: 4, lastPull: 'b', problem: 5, choice: 6 }), off)
+  for (const status of ['off', 'syncing', 'ok', 'offline', 'signin', 'choose']) assert.equal(parseSyncState({ status }).status, status)
+  assert.deepEqual(parseSyncState({ last: { device: 5 } }).last, { device: '', at: 0 })
+})
+
+test('a Drive doc without its device still syncs', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  const [id, file] = [...drive.files].find(([, each]) => each.name === 'state.json') ?? assert.fail('no state')
+  drive.files.set(id, { ...file, content: file.content.replace(/"device":"[^"]*",/, '') })
+  const b = await synced(drive)
+  assert.deepEqual(titles(b.store), ['a'])
+  assert.deepEqual((await b.sync.state()).last, { device: '', at: 1000 })
+})
+
+test('no previews: Drive isn’t asked which there are', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  let lists = 0
+  const list = drive.list.bind(drive)
+  drive.list = () => {
+    lists += 1
+    return list()
+  }
+  await synced(drive)
+  assert.equal(lists, 1)
+})
+
+test('rebase of nothing changed here: the remote doc, with ids never going back', () => {
+  const base = emptyDoc()
+  const local = structuredClone(base)
+  allocSpark(local, { title: toLabel('gone'), url: SparkUrl.parse('https://a.example/'), thumb: null })
+  allocView(local, 'Gone')
+  local.sparks = []
+  local.views = local.views.slice(0, 2)
+  const remote = structuredClone(base)
+  remote.prefs.columns = 7
+  const doc = rebase(base, base, remote)
+  assert.deepEqual(doc, remote)
+  const kept = rebase(local, local, remote)
+  assert.equal(kept.nextSparkId, 1)
+  assert.equal(kept.nextViewId, 3)
+  assert.equal(kept.prefs.columns, 7)
+})
+
+test('rebase keeps the ids made here when the remote doc made none', () => {
+  const base = emptyDoc()
+  const local = structuredClone(base)
+  allocSpark(local, { title: toLabel('mine'), url: SparkUrl.parse('https://a.example/'), thumb: null })
+  allocView(local, 'Mine')
+  const remote = structuredClone(base)
+  remote.prefs.columns = 7
+  const doc = rebase(base, local, remote)
+  assert.deepEqual(
+    doc.sparks.map((spark) => [spark.id, spark.title]),
+    [[0, 'mine']]
+  )
+  assert.deepEqual(
+    doc.views.map((view) => [view.id, view.title]),
+    [
+      [0, 'All'],
+      [1, 'Unlabeled'],
+      [2, 'Mine']
+    ]
+  )
+  assert.equal(doc.nextSparkId, 1)
+  assert.equal(doc.nextViewId, 3)
+  assert.equal(doc.prefs.columns, 7)
+})
+
+test('rebase: only what’s new here gets a new id, a change to something known keeps its own', () => {
+  const url = SparkUrl.parse('https://a.example/')
+  const base = emptyDoc()
+  allocSpark(base, { title: toLabel('old'), url, thumb: null })
+  allocView(base, 'Old')
+  const local = structuredClone(base)
+  const old = local.sparks[0] ?? assert.fail('no spark')
+  old.title = toLabel('edited')
+  allocSpark(local, { title: toLabel('mine'), url, thumb: null })
+  const mineView = allocView(local, 'Mine')
+  mineView.order = [SparkId.parse(1)]
+  const oldView = local.views.find((view) => view.title === 'Old') ?? assert.fail('no view')
+  oldView.title = LabelName.parse('Older')
+  const remote = structuredClone(base)
+  allocSpark(remote, { title: toLabel('theirs'), url, thumb: null })
+  allocView(remote, 'Theirs')
+  const doc = rebase(base, local, remote)
+  assert.deepEqual(
+    doc.sparks.map((spark) => [spark.id, spark.title]),
+    [
+      [0, 'edited'],
+      [1, 'theirs'],
+      [2, 'mine']
+    ]
+  )
+  assert.deepEqual(
+    doc.views.map((view) => [view.id, view.title]),
+    [
+      [0, 'All'],
+      [1, 'Unlabeled'],
+      [2, 'Older'],
+      [3, 'Theirs'],
+      [4, 'Mine']
+    ]
+  )
+  assert.equal(doc.nextSparkId, 3)
+  assert.equal(doc.nextViewId, 5)
+})
+
+test('rebase: a new order made here wins, otherwise the remote one stays', () => {
+  const url = SparkUrl.parse('https://a.example/')
+  const base = emptyDoc()
+  for (const title of ['a', 'b']) allocSpark(base, { title: toLabel(title), url, thumb: null })
+  for (const title of ['X', 'Y']) allocView(base, title)
+  const remote = structuredClone(base)
+  remote.sparks.reverse()
+  remote.views = [...remote.views.slice(0, 2), ...remote.views.slice(2).reverse()]
+  const added = structuredClone(base)
+  allocSpark(added, { title: toLabel('c'), url, thumb: null })
+  allocView(added, 'Z')
+  const kept = rebase(base, added, remote)
+  assert.deepEqual(
+    kept.sparks.map((spark) => spark.title),
+    ['b', 'a', 'c']
+  )
+  assert.deepEqual(
+    kept.views.map((view) => view.title),
+    ['All', 'Unlabeled', 'Y', 'X', 'Z']
+  )
+  const moved = structuredClone(base)
+  moved.sparks.reverse()
+  moved.views = [...moved.views.slice(0, 2), ...moved.views.slice(2).reverse()]
+  const remoteChanged = structuredClone(base)
+  remoteChanged.prefs.columns = 7
+  const mine = rebase(base, moved, remoteChanged)
+  assert.deepEqual(
+    mine.sparks.map((spark) => spark.title),
+    ['b', 'a']
+  )
+  assert.deepEqual(
+    mine.views.map((view) => view.title),
+    ['All', 'Unlabeled', 'Y', 'X']
+  )
+})
+
+test('taking a doc keeps the higher ids of this browser', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  const b = await browserWith(drive)
+  await b.store.commit((doc) => {
+    allocView(doc, 'Kept')
+    return undefined
+  })
+  await b.sync.start('Chrome on Windows')
+  assert.deepEqual(titles(b.store), ['a'])
+  assert.equal(b.store.doc.nextViewId, 3)
+})
+
+test('trouble while sync is off leaves the status alone', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  drive.failure = new OfflineError('no')
+  await a.sync.deleteFromDrive()
+  assert.deepEqual(await a.sync.state(), parseSyncState(undefined))
+})
+
+test('trouble: offline warns with its cause, anything else is an error', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => undefined)
+  const error = t.mock.method(console, 'error', () => undefined)
+  const drive = new FakeDrive()
+  const a = await synced(drive, 'a')
+  await add(a.store, 'b')
+  drive.failure = new OfflineError('no', { cause: new TypeError('NetworkError') })
+  await a.sync.run(false)
+  assert.equal((await a.sync.state()).problem, 'TypeError: NetworkError')
+  assert.equal(warn.mock.callCount(), 1)
+  assert.equal(warn.mock.calls[0]?.arguments[0], 'FireDial sync:')
+  assert.equal(error.mock.callCount(), 0)
+  drive.failure = new OfflineError('busy')
+  await a.sync.run(false)
+  assert.equal((await a.sync.state()).problem, 'Error: busy')
+  drive.failure = new Error('broken')
+  await a.sync.run(false)
+  const state = await a.sync.state()
+  assert.equal(state.status, 'offline')
+  assert.equal(state.problem, 'Error: broken')
+  assert.equal(error.mock.callCount(), 1)
+  assert.equal(error.mock.calls[0]?.arguments[0], 'FireDial sync:')
+  assert.equal(warn.mock.callCount(), 2)
+})
+
+test('start begins afresh: no old base, syncing until done', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  const b = await browserWith(drive)
+  await add(b.store, 'mine')
+  await b.kv.set({ syncBase: { sparks: [] } })
+  const seen = written(b, 'sync')
+  await b.sync.start('Chrome on Windows')
+  assert.equal(b.kv.data.has('syncBase'), false)
+  assert.deepEqual(statuses(seen), ['syncing', 'syncing', 'choose'])
+})
+
+test('the answer to a question nobody asked does nothing', async () => {
+  const drive = new FakeDrive()
+  const a = await synced(drive, 'a')
+  const seen = written(a, 'sync')
+  await a.sync.choose('local')
+  assert.deepEqual(seen, [])
+})
+
+test('the answer clears the question, even with Drive emptied meanwhile', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  const b = await browserWith(drive)
+  await add(b.store, 'mine')
+  await b.sync.start('Chrome on Windows')
+  const seen = written(b, 'sync')
+  drive.files.clear()
+  await b.sync.choose('local')
+  assert.deepEqual(statuses(seen).slice(0, 1), ['syncing'])
+  assert.equal(parseSyncState(seen[0]).choice, null)
+  const state = await b.sync.state()
+  assert.equal(state.status, 'ok')
+  assert.equal(state.version, 1)
+  assert.equal(state.choice, null)
+  assert.deepEqual(drive.names(), ['state.json'])
+})
+
+test('nothing runs while sync is off or waits for the answer', async () => {
+  const drive = new FakeDrive()
+  const off = await browserWith(drive)
+  await add(off.store, 'a')
+  await off.sync.run(true)
+  assert.deepEqual(drive.names(), [])
+  await synced(drive, 'x')
+  const b = await browserWith(drive)
+  await add(b.store, 'mine')
+  await b.sync.start('Chrome on Windows')
+  const before = [...drive.files.values()].map((file) => file.content)
+  await b.sync.run(true)
+  assert.deepEqual(
+    [...drive.files.values()].map((file) => file.content),
+    before
+  )
+  assert.equal((await b.sync.state()).status, 'choose')
+})
+
+test('stop forgets the base', async () => {
+  const drive = new FakeDrive()
+  const a = await synced(drive, 'a')
+  assert.equal(a.kv.data.has('syncBase'), true)
+  await a.sync.stop()
+  assert.equal(a.kv.data.has('syncBase'), false)
+})
+
+test('Delete from Drive shows how far it is from the start, and stops showing it even when it fails', async () => {
+  const drive = new FakeDrive()
+  const a = await synced(drive, 'a', 'b')
+  await add(a.store, 'c', 'data:image/png;base64,AAAA')
+  await a.sync.run(false)
+  const seen = written(a, 'syncProgress')
+  await a.sync.deleteFromDrive()
+  assert.deepEqual(seen, [
+    { done: 0, total: 0, deleting: true },
+    { done: 2, total: 2, deleting: true }
+  ])
+  assert.equal(a.kv.data.has('syncProgress'), false)
+  assert.equal(a.kv.data.has('syncBase'), false)
+  const b = await synced(drive, 'x')
+  const remove = drive.remove.bind(drive)
+  drive.remove = () => Promise.reject(new OfflineError('no'))
+  await b.sync.deleteFromDrive()
+  drive.remove = remove
+  assert.equal(b.kv.data.has('syncProgress'), false)
+  assert.equal(b.kv.data.has('syncBase'), true)
+  assert.equal((await b.sync.state()).status, 'offline')
+})
+
+test('a few previews move without showing how far; ten do', async () => {
+  for (const [count, shown] of [
+    [9, false],
+    [10, true]
+  ] as const) {
+    const drive = new FakeDrive()
+    const a = await browserWith(drive)
+    for (let index = 0; index < count; index++) await add(a.store, `s${index}`, `data:image/png;base64,${index}`)
+    const seen = written(a, 'syncProgress')
+    await a.sync.start('Firefox on Windows')
+    assert.equal(seen.length > 0, shown)
+  }
+})
+
+test('previews moving fast: how far it is shows at most every quarter second', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  for (let index = 0; index < 12; index++) await add(a.store, `s${index}`, `data:image/png;base64,${index}`)
+  const seen = written(a, 'syncProgress')
+  await a.sync.start('Firefox on Windows')
+  assert.deepEqual(seen, [
+    { done: 0, total: 12 },
+    { done: 12, total: 12 }
+  ])
+  let now = 0
+  const b = await browserWith(drive)
+  const slow = new Sync(b.store, b.kv, drive, () => (now += 100))
+  const shown = written(b, 'syncProgress')
+  await slow.start('Chrome on Windows')
+  const done = shown.map((progress) => z.object({ done: z.number() }).parse(progress).done)
+  assert.equal(done[0], 0)
+  assert.equal(done.at(-1), 12)
+  assert.ok(done.length > 2 && done.length < 13, `shown ${done.join()}`)
+})
+
+test('a preview gone from Drive: the spark comes without it', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  for (let index = 0; index < 2; index++) await add(a.store, `s${index}`, `data:image/png;base64,${index}`)
+  await a.sync.start('Firefox on Windows')
+  for (const [id, file] of drive.files) if (file.name.startsWith('thumb-')) drive.files.delete(id)
+  const b = await browserWith(drive)
+  await b.sync.start('Chrome on Windows')
+  assert.deepEqual(titles(b.store), ['s0', 's1'])
+  assert.equal((await b.store.thumbIds()).size, 0)
+})
+
+test('after trouble, a run shows syncing again; when all is well it doesn’t', async () => {
+  const drive = new FakeDrive()
+  const a = await synced(drive, 'a')
+  const quiet = written(a, 'sync')
+  await a.sync.run(true)
+  assert.deepEqual(statuses(quiet), ['ok'])
+  await add(a.store, 'b')
+  drive.failure = new OfflineError('no')
+  await a.sync.run(false)
+  drive.failure = null
+  quiet.length = 0
+  await a.sync.run(true)
+  assert.deepEqual(statuses(quiet).slice(0, 1), ['syncing'])
+  assert.equal((await a.sync.state()).status, 'ok')
+})
+
+test('a pull without news says when it looked', async () => {
+  const drive = new FakeDrive()
+  let now = 1000
+  const a = await browserWith(drive)
+  await add(a.store, 'a')
+  const sync = new Sync(a.store, a.kv, drive, () => now)
+  await sync.start('Firefox on Windows')
+  now = 5000
+  await sync.run(true)
+  const state = await sync.state()
+  assert.equal(state.lastPull, 5000)
+  assert.equal(state.status, 'ok')
+})
+
+test('previews still in use stay on Drive', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  await add(a.store, 'a', 'data:image/png;base64,AAAA')
+  await a.sync.start('Firefox on Windows')
+  await add(a.store, 'b')
+  await a.sync.run(false)
+  assert.equal(drive.names().filter((name) => name.startsWith('thumb-')).length, 1)
 })

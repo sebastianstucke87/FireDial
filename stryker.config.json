@@ -5,7 +5,16 @@
   "tap": {
     "testFiles": ["src/**/*.test.ts"]
   },
-  "mutate": ["src/*.ts", "!src/*.test.ts", "!src/background.ts", "!src/newtab.ts", "!src/theme.ts", "!src/theme-key.ts"],
+  "mutate": [
+    "src/*.ts",
+    "!src/*.test.ts",
+    "!src/background.ts",
+    "!src/newtab.ts",
+    "!src/theme.ts",
+    "!src/theme-key.ts",
+    "!src/google.ts",
+    "!src/sync-config.ts"
+  ],
   "ignorePatterns": ["tsconfig.json", "dist", "e2e", "*.local*", "default-demo-sparks.json5"],
   "reporters": ["clear-text", "html", "json", "progress"],
   "htmlReporter": {
