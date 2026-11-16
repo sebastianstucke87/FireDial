@@ -4,6 +4,6 @@
   "categories": { "firefox": ["tabs", "bookmarks"] },
   "version": {
     "license": "MIT",
-    "approval_notes": "TypeScript bundled with esbuild, not minified. Rebuild: npm ci && npm run build, needs Node 26. Output is in dist/firefox. Optional Sync: identity.launchWebAuthFlow with Google (scope drive.appdata), data goes only to the user's own Drive app folder; asked for with the optional data collection permissions bookmarksInfo and websiteContent."
+    "approval_notes": "TypeScript bundled with esbuild, not minified. Rebuild: npm ci && npm run build, needs Node 26. Output is in dist/firefox. Optional Sync: identity.launchWebAuthFlow with Google (scopes drive.appdata and drive.file), data goes only to the user's own Drive: its app folder, plus backups in a visible FireDial folder; asked for with the optional data collection permissions bookmarksInfo and websiteContent."
   }
 }
