@@ -8,7 +8,7 @@
     "service_worker": "js/background.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "bookmarks", "contextMenus", "downloads", "favicon", "scripting", "search", "storage", "unlimitedStorage"],
+  "permissions": ["activeTab", "bookmarks", "contextMenus", "downloads", "favicon", "identity", "scripting", "search", "storage", "unlimitedStorage"],
   "optional_host_permissions": ["<all_urls>"],
   "chrome_url_overrides": {
     "newtab": "newtab.html"

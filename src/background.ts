@@ -12,10 +12,13 @@ import * as z from 'zod/mini'
 
 import { parseBackup } from './backup.ts'
 import { BookmarkSync, hasBookmarkFolder, samePage } from './bookmarks.ts'
+import { GoogleDrive } from './drive.ts'
+import { deviceName, forgetToken, googleAuth, revokeAccess, SYNC_DATA } from './google.ts'
 import { blobToDataUrl, faviconPath, isStoredImage } from './images.ts'
 import { addTo, allocSpark, allocView, isVanilla, newThumbId, nextViewName, SparkId, toLabel, toSparkUrl, ViewId } from './model.ts'
 import type { Doc } from './model.ts'
 import { browserKeyValue, Store, webLock } from './store.ts'
+import { Sync, SyncCommand } from './sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 import type { Reveal } from './ui/toast.ts'
 
@@ -158,9 +161,50 @@ async function dailyCleanup(): Promise<void> {
 
 const sync = new BookmarkSync(store, browserKeyValue, browser.bookmarks)
 
+// Drive sync: changes go up a moment after they're made, so a burst of them goes as one. Newer
+// ones come down when a new tab opens or gets focus, at most every PULL_COOLDOWN; Sync now in
+// the settings doesn't wait. Without a connection, it tries again every RETRY_DELAY.
+const PUSH_DELAY = 2000 // ms
+const PULL_COOLDOWN = 30_000 // ms
+const RETRY_DELAY = 60_000 // ms
+const SyncMessage = z.object({ sync: SyncCommand })
+const drive = new GoogleDrive(googleAuth(async () => (await driveSync.state()).email))
+const driveSync = new Sync(store, browserKeyValue, drive)
+let pushTimer: ReturnType<typeof setTimeout> | undefined
+let retryTimer: ReturnType<typeof setTimeout> | undefined
+
+async function syncDrive(pull: boolean): Promise<void> {
+  clearTimeout(retryTimer)
+  await driveSync.run(pull)
+  if ((await driveSync.state()).status === 'offline') retryTimer = setTimeout(() => void syncDrive(true), RETRY_DELAY)
+}
+
+async function syncCommand(command: SyncCommand): Promise<void> {
+  if (command === 'start') await driveSync.start(await deviceName())
+  else if (command === 'drive' || command === 'local') await driveSync.choose(command)
+  else if (command === 'now') await syncDrive(true)
+  else if (command === 'pull') {
+    if (Date.now() - (await driveSync.state()).lastPull >= PULL_COOLDOWN) await syncDrive(true)
+  } else {
+    await (command === 'stop' ? driveSync.stop() : driveSync.deleteFromDrive())
+    if ((await driveSync.state()).on) return
+    await (command === 'delete' ? revokeAccess() : forgetToken())
+    if (!IS_CHROME) await browser.permissions.remove({ data_collection: SYNC_DATA }).catch(() => false)
+  }
+}
+
+browser.runtime.onMessage.addListener((message: unknown) => {
+  const command = SyncMessage.safeParse(message)
+  if (command.success) void syncCommand(command.data.sync)
+})
+
 browserKeyValue.onChanged((keys) => {
   if (keys.has('views')) rebuildMenu()
-  if (keys.has('rev')) void sync.requestPush()
+  if (keys.has('rev')) {
+    void sync.requestPush()
+    clearTimeout(pushTimer)
+    pushTimer = setTimeout(() => void syncDrive(false), PUSH_DELAY)
+  }
 })
 
 browser.bookmarks.onCreated.addListener(() => {
@@ -197,6 +241,7 @@ async function seed(): Promise<void> {
 }
 
 void dailyCleanup()
+void syncDrive(true)
 void seed()
   .catch((error: unknown) => {
     console.error('FireDial defaults:', error)

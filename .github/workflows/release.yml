@@ -1,4 +1,4 @@
-# Every push to main and every pull request (e.g. from Dependabot) is tested, in Firefox and Chrome. A tag like v2026.11.10.1834 on main is also submitted to addons.mozilla.org and the Chrome Web Store.
+# Every push to main and every pull request (e.g. from Dependabot) is tested, in Firefox and Chrome. A tag like v2026.11.10.1834 on main is also submitted to addons.mozilla.org and the Chrome Web Store, each by its own job once the tests passed. The repository variables AMO_UPLOAD and CWS_UPLOAD set to 'false' skip that store.
 
 name: Release
 
@@ -60,8 +60,6 @@ jobs:
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    # The AMO keys live in the environment amo, which only v* tags may use; everything else runs without one.
-    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'amo' || '' }}
     env:
       RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
@@ -93,19 +91,37 @@ jobs:
         if: env.RELEASE != 'true'
         with:
           path: reports/stryker-incremental.json
-          key: stryker-${{ github.sha }}
-          restore-keys: stryker-
+          key: stryker2-${{ github.sha }}
+          restore-keys: stryker2-
       - id: mutate
         run: npm run mutate
       - uses: actions/cache/save@v6.1.0
         if: always() && steps.mutate.outcome != 'skipped' && hashFiles('reports/stryker-incremental.json') != ''
         with:
           path: reports/stryker-incremental.json
-          key: stryker-${{ github.sha }}
+          key: stryker2-${{ github.sha }}
 
-      # Listed versions need review, usually automatic. Waiting for it could outlast this job, so submit and finish.
+  # The AMO keys live in the environment amo, which only v* tags may use. Runs once the release
+  # job tested the tag, builds it the same way and submits it. Listed versions need review, usually
+  # automatic; waiting for it could outlast this job, so submit and finish.
+  amo:
+    name: Firefox Add-ons
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && vars.AMO_UPLOAD != 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: amo
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 26
+          package-manager-cache: false
+      - run: npm ci
+      - run: FIREDIAL_VERSION="${GITHUB_REF_NAME#v}" npm run build
       - name: Submit to addons.mozilla.org
-        if: env.RELEASE == 'true'
         run: |
           git ls-files -z | xargs -0 zip -q firedial-source.zip
           npx web-ext sign --source-dir dist/firefox --channel listed --amo-metadata browsers/publishing/amo-metadata.json --upload-source-code firedial-source.zip --approval-timeout 0
@@ -115,9 +131,10 @@ jobs:
 
   # The Chrome Web Store's keys live in the environment chrome-web-store, which only v* tags may
   # use. Runs once the release job tested the tag, builds it the same way and submits it for review.
-  chrome-web-store:
+  cws:
+    name: Chrome Web Store
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.CWS_UPLOAD != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: chrome-web-store

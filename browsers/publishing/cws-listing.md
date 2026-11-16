@@ -11,6 +11,8 @@ FireDial turns your new tab into a speed dial of your bookmarks, in views. Add a
 
 Pick a layout, columns, light or dark and an accent color. Search, undo, backups.
 
+Optional Sync keeps FireDial the same in Firefox and Chrome, through your own Google Drive.
+
 No ads, no account, no tracking. Your sparks are Chrome bookmarks, so Chrome sync carries them. Open source: https://github.com/sebastianstucke87/FireDial
 
 Enjoy your new tab!
@@ -40,7 +42,7 @@ English
 
 ### Homepage URL
 
-https://github.com/sebastianstucke87/FireDial
+https://firedial.org/
 
 ### Support URL
 
@@ -64,6 +66,7 @@ Shows the user's bookmarks as a speed dial on the new tab page.
 | `scripting`             | The short confirmation shown on that page after adding                                                                                                          |
 | `search`                | Searching the web from the new tab with the user's default search engine                                                                                        |
 | `downloads`             | Saving backups                                                                                                                                                  |
+| `identity`              | Signing in to Google for the optional Sync, which keeps the user's sparks in their own Google Drive app folder                                                  |
 | `favicon`               | A page's icon from Chrome's own copy when no preview can be taken, so the site isn't asked                                                                      |
 | `storage`               | Settings, undo history, preview images                                                                                                                          |
 | `unlimitedStorage`      | Preview images can outgrow the default quota                                                                                                                    |
@@ -75,11 +78,11 @@ No, I am not using remote code.
 
 ### Data usage
 
-Nothing collected. Tick the three certifications.
+Nothing collected by the developer. Sync is optional: it sends the user's sparks, settings and previews to their own Google Drive app folder (scope `drive.appdata`) and the backups to a FireDial folder in their Drive (scope `drive.file`), nowhere else. Tick "Website content" (previews) and the three certifications.
 
 ### Privacy policy URL
 
-https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
+https://firedial.org/privacy.html
 
 ## Distribution
 

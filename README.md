@@ -19,10 +19,11 @@ Minimal speed dial for your bookmarks in Firefox and Chrome! Completely free and
 
 ## Usage
 
-- Right-click a page or link (in Firefox also a tab): **Add to FireDial**.
+- Right-click a page or link: **Add to FireDial**.
 - **Edit**: settings. **About**: shortcuts, bookmark import.
-- Views filter sparks by label, e.g. _Work or News_, _all but Private_.
-- Sparks are bookmarks (**Other Bookmarks → FireDial**), so the browser's sync carries them. Images stay local.
+- Views show sparks by label, e.g. _Work or News_, _all but Private_.
+- **Sync** keeps all browsers the same, through your own Google Drive.
+- Or just your browser's sync: sparks are bookmarks (**Other Bookmarks → FireDial**), previews stay local.
 
 ## Build
 
@@ -33,25 +34,26 @@ npm ci
 npm run build
 ```
 
-The builds are in `dist/firefox` and `dist/chrome`. `npm test` runs the checks and the tests in headless Firefox and Chrome.
+The builds are in `dist/chrome` and `dist/firefox`. `npm test` runs the checks and the tests in headless Chrome and Firefox.
 
-To load your build until Firefox restarts:
-
-1. Open `about:debugging#/runtime/this-firefox`
-2. Click `Load Temporary Add-on...`
-3. Pick `dist/firefox/manifest.json`
-
-To load it in Chrome:
+To load your build in Chrome:
 
 1. Open `chrome://extensions`
 2. Turn on `Developer mode`
 3. Click `Load unpacked` and pick `dist/chrome`
 
+To load it until Firefox restarts:
+
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click `Load Temporary Add-on...`
+3. Pick `dist/firefox/manifest.json`
+
 ## Trust
 
-- FireDial collects no data: [privacy policy](PRIVACY.md).
+- FireDial collects no data: [privacy policy](https://firedial.org/privacy.html). Sync is optional and goes to your own Google Drive.
 - FireDial is not for sale.
 - FireDial is published at:
+  - Website: [firedial.org](https://firedial.org/)
   - GitHub: [github.com/sebastianstucke87/FireDial](https://github.com/sebastianstucke87/FireDial)
   - Google, Chrome Web Store: [chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk](https://chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk)
   - Mozilla, Firefox Add-ons: [addons.mozilla.org/firefox/addon/firedial](https://addons.mozilla.org/firefox/addon/firedial)

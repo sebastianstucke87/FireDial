@@ -1,7 +1,7 @@
 # Runs after the tests of a pull request pass. A Dependabot patch or minor update is merged.
 # If the merge changed the built add-on, it is tagged with a new version and released to
 # addons.mozilla.org and the Chrome Web Store through release.yml. Releasing only happens while the repository
-# variable AMO_RELEASES is 'true', and only after a first release was tagged by hand.
+# variable DEPENDABOT_RELEASES is 'true', and only after a first release was tagged by hand.
 
 name: Dependabot
 
@@ -47,7 +47,7 @@ jobs:
   # Builds the merged commit and the last release with the same version, so only real changes count.
   compare:
     needs: merge
-    if: needs.merge.outputs.sha != '' && vars.AMO_RELEASES == 'true'
+    if: needs.merge.outputs.sha != '' && vars.DEPENDABOT_RELEASES == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

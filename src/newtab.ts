@@ -68,6 +68,7 @@ import { Dropdown } from './ui/dropdown.ts'
 import type { Choice } from './ui/dropdown.ts'
 import { editable } from './ui/editable.ts'
 import { Modal } from './ui/modal.ts'
+import { acrossBrowsers, initSync, saveToDrive } from './ui/sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 
 const THUMB_MAX_WIDTH = 640
@@ -1212,28 +1213,38 @@ const importDetail = html('#importDetail')
 const importDone = html('#importDone')
 
 // Resolves once the file is saved.
-async function writeBackup(auto: boolean): Promise<void> {
+async function writeBackup(auto: boolean): Promise<{ name: string; blob: Blob }> {
   const ids = store.doc.sparks.map((spark) => spark.thumb).filter((thumb) => thumb !== null)
   const blob = new Blob(exportParts(store.doc, await store.thumbs(ids)), { type: 'application/json' })
   if (blob.size > LIMITS.backupBytes) throw new LimitError('The backup would be larger than 1 GB')
+  const name = backupName(new Date(), auto)
   const url = URL.createObjectURL(blob)
   try {
-    await saveFile(browser.downloads, url, backupName(new Date(), auto), auto)
+    await saveFile(browser.downloads, url, name, auto)
   } finally {
     URL.revokeObjectURL(url)
   }
+  return { name, blob }
 }
 
 // What may not happen without a backup of what it replaces. outcome: what didn't happen, if that fails.
 // False when there was nothing to keep, so no file.
+// With sync on, a copy goes to the FireDial folder in Google Drive too: the change reaches every
+// browser, so the downloads folder of this one may not be where it's missed. The file here is
+// what counts: without Drive, the change still goes ahead.
 async function autoBackup(outcome: string): Promise<boolean> {
   if (isVanilla(store.doc)) return false
+  let backup: { name: string; blob: Blob }
   try {
-    await writeBackup(true)
-    return true
+    backup = await writeBackup(true)
   } catch (error) {
     throw new Error(`The backup failed, so nothing was ${outcome}: ${errorText(error)}`, { cause: error })
   }
+  await saveToDrive(backup.name, backup.blob).catch((error: unknown) => {
+    console.warn('FireDial backup to Drive:', error)
+    notify('Backup not saved to Google Drive')
+  })
+  return true
 }
 
 async function exportData(): Promise<void> {
@@ -1272,17 +1283,45 @@ async function importFile(file: File): Promise<string> {
   if (file.size > LIMITS.backupBytes) throw new LimitError('The file is larger than 1 GB')
   showImport('Reading the file')
   const backup = readBackup(await file.text())
-  showImport('Saving a backup')
+  showImport('Saving a backup before import')
   await autoBackup('imported')
   let done = 0
   const sparks = []
+  const stored = await store.images() // as they are: shrunk, they'd count as new and sync again
   for (const spark of backup.sparks) {
-    sparks.push({ ...spark, src: spark.src.startsWith('data:') ? await shrinkImage(spark.src) : spark.src })
+    const shrink = spark.src.startsWith('data:') && !stored.has(spark.src)
+    sparks.push({ ...spark, src: shrink ? await shrinkImage(spark.src) : spark.src })
     showImport(`${++done} of ${plural(backup.sparks.length, 'spark')}`, done / backup.sparks.length)
   }
   showImport('Saving')
   await replaceData({ ...backup, sparks })
   return importSummary(backup.views.filter((view) => view.kind === 'normal').length, sparks.length, backup.skipped)
+}
+
+// Steps that can take a while (the backup goes to Drive too) behind the import modal, which closes
+// by itself when they're done. A failure stays in it with its reason: null.
+async function withProgress<T>(title: string, run: () => Promise<T>): Promise<T | null> {
+  const closed = openWork(title, '')
+  try {
+    const result = await run()
+    importModal.close()
+    await closed
+    return result
+  } catch (error) {
+    endImport(`${title} failed`, errorText(error), 'Close')
+    await closed
+    return null
+  }
+}
+
+// The import modal with a running bar and what's going on: closed by its caller.
+function openWork(title: string, detail: string): Promise<string> {
+  importModal.title = title
+  importModal.dismissible = false
+  importProgress.hidden = false
+  importDone.hidden = true
+  showImport(detail)
+  return importModal.open()
 }
 
 // The page follows after Done, so the modal keeps its look until then.
@@ -1305,7 +1344,7 @@ const importInput = $('#importFile', HTMLInputElement)
 
 // Asks first, then picks the file: the click on the answer still counts as the user's for the picker.
 async function askImport(): Promise<void> {
-  if (await confirm.ask(IMPORT)) importInput.click()
+  if (await confirm.ask(acrossBrowsers(IMPORT))) importInput.click()
 }
 
 importInput.addEventListener('change', () => {
@@ -2001,9 +2040,9 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
   about: () => {
     openAbout()
   },
-  'ask-delete-everything': () => void askFromAbout(DELETE_EVERYTHING, deleteEverything),
+  'ask-delete-everything': () => void askFromAbout(acrossBrowsers(DELETE_EVERYTHING), deleteEverything),
   'ask-reset-settings': () => void askFromAbout(RESET_SETTINGS, resetSettings),
-  'ask-start-over': () => void askFromAbout(START_OVER, startOver),
+  'ask-start-over': () => void askFromAbout(acrossBrowsers(START_OVER), startOver),
   reload: () => {
     location.reload()
   }
@@ -2602,29 +2641,33 @@ async function resetSettings(): Promise<void> {
 
 // The bookmarks in the FireDial folder go too: left there, they would come back as sparks.
 async function deleteEverything(): Promise<void> {
-  try {
-    const saved = await autoBackup('deleted')
+  const saved = await withProgress('Delete all', async () => {
+    showImport('Saving a backup')
+    const backedUp = await autoBackup('deleted')
+    showImport('Deleting')
     await replaceData({ views: [], sparks: [], prefs: { ...DEFAULT_PREFS } })
-    setEditing(false)
-    await afterChange()
-    if (saved) notify('Backup saved')
-  } catch (error) {
-    notify(errorText(error))
-  }
+    return backedUp
+  })
+  if (saved === null) return
+  setEditing(false)
+  await afterChange()
+  if (saved) notify('Backup saved')
 }
 
 // As a fresh install: the sparks in defaults.json and the default settings.
 async function startOver(): Promise<void> {
-  try {
+  const saved = await withProgress('Start over', async () => {
     const defaults = readBackup(await (await fetch(browser.runtime.getURL('defaults.json'))).text())
-    const saved = await autoBackup('replaced')
+    showImport('Saving a backup')
+    const backedUp = await autoBackup('replaced')
+    showImport('Starting over')
     await replaceData(defaults)
-    setEditing(false)
-    await afterChange()
-    if (saved) notify('Backup saved')
-  } catch (error) {
-    notify(errorText(error))
-  }
+    return backedUp
+  })
+  if (saved === null) return
+  setEditing(false)
+  await afterChange()
+  if (saved) notify('Backup saved')
 }
 
 async function start(): Promise<void> {
@@ -2660,6 +2703,10 @@ async function init(): Promise<void> {
   if (revealing !== null) revealSpark(revealing)
   store.watch(() => void followStore())
   void loadEngines()
+  initSync(confirm, askFromAbout, {
+    open: (title, detail) => void openWork(title, detail),
+    close: () => importModal.close()
+  })
 }
 
 void init()

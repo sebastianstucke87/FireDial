@@ -9,6 +9,7 @@ export interface Question {
   text: string
   button: string
   plain?: boolean
+  link?: string // a part of text that answers with 'link' instead, e.g. to go somewhere else
 }
 
 export class Confirm {
@@ -43,11 +44,27 @@ export class Confirm {
   private onYes: (() => void) | null = null
 
   // yes runs in the click on the button itself, for what Firefox allows only there.
-  async ask({ title, text, button, plain = false }: Question, yes?: () => void): Promise<boolean> {
+  async ask(question: Question, yes?: () => void): Promise<boolean> {
+    return (await this.answer(question, yes)) === 'yes'
+  }
+
+  // 'yes', 'link' (its part of the text was clicked) or '' (cancelled).
+  async answer({ title, text, button, plain = false, link = '' }: Question, yes?: () => void): Promise<'yes' | 'link' | ''> {
     this.onYes = yes ?? null
     this.modal.title = title
-    this.text.textContent = text
-    this.plainText.textContent = text
+    const clicked = { link: false }
+    const at = link ? text.indexOf(link) : -1
+    const parts = (): (Node | string)[] => {
+      if (at < 0) return [text]
+      const go = el('button', { type: 'button', class: 'TextLink' }, link)
+      go.addEventListener('click', () => {
+        clicked.link = true
+        this.modal.close()
+      })
+      return [text.slice(0, at), go, text.slice(at + link.length)]
+    }
+    this.text.replaceChildren(...parts())
+    this.plainText.replaceChildren(...parts())
     this.box.hidden = plain
     this.plainText.hidden = !plain
     this.warn.style.display = plain ? 'none' : ''
@@ -56,6 +73,7 @@ export class Confirm {
     this.button.disabled = !plain
     ;(plain ? this.button : this.check).autofocus = true
     ;(plain ? this.check : this.button).autofocus = false
-    return (await this.modal.open()) === 'save'
+    if ((await this.modal.open()) === 'save') return 'yes'
+    return clicked.link ? 'link' : ''
   }
 }

@@ -173,7 +173,7 @@ after(async () => {
   rmSync(folder, { recursive: true, force: true })
 })
 
-test('all seven modals are built the same', async () => {
+test('all eight modals are built the same', async () => {
   await home()
   const heads = await js<string[]>(`
     return [...document.querySelectorAll('dialog')].map((dialog) => {
@@ -185,7 +185,7 @@ test('all seven modals are built the same', async () => {
     'Modal Modal--hero,#i-flame,1',
     'Modal Modal--steady,#i-flame,1',
     'Modal Modal--steady,#i-flame,1',
-    ...Array.from({ length: 3 }, () => 'Modal,#i-flame,1')
+    ...Array.from({ length: 4 }, () => 'Modal,#i-flame,1')
   ])
   await edit()
   await about()
@@ -207,7 +207,7 @@ test('the sidebar is called Settings, with an icon and a title per section', asy
     await js(
       "return [...document.querySelectorAll('.Options .Section__head')].map((head) => `${head.textContent} ${head.querySelector('use').getAttribute('href')}`)"
     ),
-    ['Color #i-droplet', 'Views #i-sidebar', 'Sparks #i-grid', 'Labels #i-tag', 'Backup #i-archive']
+    ['Color #i-droplet', 'Views #i-sidebar', 'Sparks #i-grid', 'Labels #i-tag', 'Backup #i-archive', 'Sync #i-sync']
   )
   assert.equal(await js("return document.querySelector('#editToggle use').getAttribute('href')"), '#i-edit')
   assert.equal(await js("return document.querySelector('.Options').getBoundingClientRect().width"), 360)
@@ -412,9 +412,11 @@ test('About ends with the version, the address and the licenses, and warns in th
   const warnings = await js<string[]>(
     "return [...document.querySelectorAll('.Button--warn')].map((button) => `${button.textContent} ${button.querySelector('use').getAttribute('href')}`)"
   )
-  assert.deepEqual(warnings, ['Import #i-alert', 'Delete all #i-alert', 'Start over #i-alert', 'View and sparks #i-alert'])
+  assert.deepEqual(warnings, ['Import #i-alert', 'Delete from Drive #i-alert', 'Delete all #i-alert', 'Start over #i-alert', 'View and sparks #i-alert'])
   assert.ok(
-    await js("return [...document.querySelectorAll('#aboutModal .Button--warn')].every((button) => button.getBoundingClientRect().height === 40)"),
+    await js(
+      "return [...document.querySelectorAll('#aboutModal .Section:not([hidden]) .Button--warn')].every((button) => button.getBoundingClientRect().height === 40)"
+    ),
     'each label on one line'
   )
   assert.deepEqual(
@@ -441,7 +443,7 @@ test('About ends with the version, the address and the licenses, and warns in th
     await js(
       "return [...document.querySelectorAll('#aboutModal .Section__head')].map((head) => `${head.textContent} ${head.querySelector('use').getAttribute('href')}`)"
     ),
-    ['Hotkeys #i-keyboard', 'Hotkeys in Edit #i-edit', 'Import #i-archive', 'Resets #i-undo']
+    ['Hotkeys #i-keyboard', 'Hotkeys in Edit #i-edit', 'Import #i-archive', 'Sync #i-sync', 'Resets #i-undo']
   )
   assert.ok(await js("return document.querySelector('#aboutModal .Divider').nextElementSibling.matches('.Modal__foot')"))
   await press(Key.ESCAPE)

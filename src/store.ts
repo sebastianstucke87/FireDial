@@ -115,6 +115,8 @@ const NextIds = z.catch(z.object({ view: Revision, spark: Revision }), { view: 0
 const List = z.catch(z.array(z.unknown()), [])
 const Colors = z.catch(z.record(z.string(), z.unknown()), {})
 
+export const parseDoc = (data: Record<string, unknown>): Doc => parseState(data).doc
+
 function parseState(data: Record<string, unknown>): State {
   const fallback = emptyDoc()
   const ids = NextIds.parse(data['nextIds'])
@@ -129,7 +131,8 @@ function parseState(data: Record<string, unknown>): State {
   return { doc, rev: Revision.parse(data['rev']), history: HistoryMetaSchema.parse(data['history']) }
 }
 
-const docItems = (doc: Doc): Record<string, unknown> => ({
+// A doc as stored, in storage.local and on Drive.
+export const docItems = (doc: Doc): Record<string, unknown> => ({
   views: doc.views,
   sparks: doc.sparks,
   prefs: doc.prefs,
@@ -282,10 +285,14 @@ export class Store {
       const state = await this.read()
       const { thumbIndex } = await this.kv.get('thumbIndex')
       const doc: Doc = { views: [], sparks: [], prefs: data.prefs, nextViewId: state.doc.nextViewId, nextSparkId: state.doc.nextSparkId }
+      const oldThumbs = parseThumbIndex(thumbIndex)
+      // An image already here keeps its id, so sync doesn't move it again.
+      const known = await this.imagesById(oldThumbs)
+      const kept = new Set([...known.values()].flat())
       const thumbs = new Map<ThumbId, string>()
       const sparkIds = new Map<number, SparkId>()
       for (const spark of data.sparks) {
-        const thumb = spark.src ? newThumbId() : null
+        const thumb = spark.src ? (known.get(spark.src)?.shift() ?? newThumbId()) : null
         if (thumb) thumbs.set(thumb, spark.src)
         sparkIds.set(spark.key, allocSpark(doc, { title: spark.title, url: spark.url, thumb, labels: spark.labels }).id)
       }
@@ -296,16 +303,42 @@ export class Store {
       }
       canonicalize(doc) // a title twice: the first one stays; All and Unlabeled get their own rules
       checkLimits(doc)
-      const entries = [...thumbs]
+      const entries = [...thumbs].filter(([id]) => !kept.has(id))
       for (let start = 0; start < entries.length; start += THUMB_CHUNK) {
         await this.kv.set(Object.fromEntries(entries.slice(start, start + THUMB_CHUNK).map(([id, src]) => [thumbKey(id), src])))
       }
       const history = { first: 0, cursor: 0, end: 0 }
       await this.kv.set({ ...docItems(doc), rev: state.rev + 1, history, thumbIndex: [...thumbs.keys()] })
-      await this.kv.remove(['thumbColors', ...stepKeys(state.history.first, state.history.end), ...parseThumbIndex(thumbIndex).map(thumbKey)])
+      await this.kv.remove(['thumbColors', ...stepKeys(state.history.first, state.history.end), ...oldThumbs.filter((id) => !thumbs.has(id)).map(thumbKey)])
       this.adopt({ doc, rev: state.rev + 1, history })
       return doc.views.find((view) => view.kind === 'all')?.id ?? ViewId.parse(0)
     })
+  }
+
+  // The images stored here, each with its ids: one image may show on several sparks.
+  private async imagesById(ids: readonly ThumbId[]): Promise<Map<string, ThumbId[]>> {
+    const known = new Map<string, ThumbId[]>()
+    for (let start = 0; start < ids.length; start += THUMB_CHUNK) {
+      const part = ids.slice(start, start + THUMB_CHUNK)
+      const found = await this.kv.get(part.map(thumbKey))
+      for (const id of part) {
+        const src = found[thumbKey(id)]
+        if (typeof src === 'string') known.set(src, [...(known.get(src) ?? []), id])
+      }
+    }
+    return known
+  }
+
+  // The images stored here, as they are: an import leaves these as they are, so they keep their id.
+  async images(): Promise<Set<string>> {
+    const { thumbIndex } = await this.kv.get('thumbIndex')
+    return new Set((await this.imagesById(parseThumbIndex(thumbIndex))).keys())
+  }
+
+  // The ids of the images stored here.
+  async thumbIds(): Promise<Set<ThumbId>> {
+    const { thumbIndex } = await this.kv.get('thumbIndex')
+    return new Set(parseThumbIndex(thumbIndex))
   }
 
   async thumbs(ids: readonly ThumbId[]): Promise<Map<ThumbId, string>> {
