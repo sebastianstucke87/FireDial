@@ -22,15 +22,19 @@ const STATE_FILE = 'state.json'
 const THUMB_PREFIX = 'thumb-'
 const ROUNDS = 5 // pull-then-push rounds before giving up until the next change
 const SHOWN_FROM = 10 // previews moving at once before the page shows how far it is
-const PARALLEL = 8 // Drive requests at once: each image waits about a second for Google, not for the line
+// Drive requests at once: each image waits about a second for Google, not for the line. Reads can
+// go wide; writes stay fewer, as Drive slows down a user who writes many files a second.
+const READS = 20
+const WRITES = 8
+const PROGRESS_EVERY = 250 // ms between progress updates: each is a storage write
 
-// Runs task for each item, PARALLEL at a time.
-async function inParallel<T>(items: readonly T[], task: (item: T) => Promise<void>): Promise<void> {
+// Runs task for each item, limit at a time.
+async function inParallel<T>(items: readonly T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
   const queue = [...items]
   const worker = async (): Promise<void> => {
     for (let item = queue.shift(); item !== undefined; item = queue.shift()) await task(item)
   }
-  await Promise.all(Array.from({ length: Math.min(PARALLEL, items.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
 }
 
 // What a FireDial page asks the background for: { sync: command }.
@@ -229,16 +233,16 @@ export class Sync {
   // What sync put on Drive goes (backups in the FireDial folder stay), and sync stops.
   deleteFromDrive(): Promise<void> {
     return this.serial(async () => {
-      const ids = (await this.drive.list()).map((file) => file.id)
-      const total = ids.length
-      const shown = total >= SHOWN_FROM
+      // From the start and however few: the page that asked waits for it to go.
+      await this.kv.set({ syncProgress: { done: 0, total: 0, deleting: true } })
       try {
-        if (shown) await this.kv.set({ syncProgress: { done: 0, total, deleting: true } })
+        const ids = (await this.drive.list()).map((file) => file.id)
+        const total = ids.length
         await this.drive.remove(ids, async (done) => {
-          if (shown) await this.kv.set({ syncProgress: { done, total, deleting: true } })
+          await this.kv.set({ syncProgress: { done, total, deleting: true } })
         })
       } finally {
-        if (shown) await this.kv.remove('syncProgress')
+        await this.kv.remove('syncProgress')
       }
       await this.kv.remove('syncBase')
       await this.kv.set({ sync: parseSyncState({}) })
@@ -267,15 +271,18 @@ export class Sync {
 
   // Previews to or from Drive. Many of them take a while (the first sync): FireDial pages show how
   // far it is from syncProgress.
-  private async transfer<T>(items: readonly T[], task: (item: T) => Promise<void>): Promise<void> {
-    if (items.length < SHOWN_FROM) return inParallel(items, task)
+  private async transfer<T>(items: readonly T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
+    if (items.length < SHOWN_FROM) return inParallel(items, limit, task)
     let done = 0
+    let shownAt = this.now()
     const total = items.length
     await this.kv.set({ syncProgress: { done, total } })
     try {
-      await inParallel(items, async (item) => {
+      await inParallel(items, limit, async (item) => {
         await task(item)
         done += 1
+        if (done < total && this.now() - shownAt < PROGRESS_EVERY) return
+        shownAt = this.now()
         await this.kv.set({ syncProgress: { done, total } })
       })
     } finally {
@@ -289,7 +296,7 @@ export class Sync {
     const missing = [...thumbsOf(target)].filter((id) => !have.has(id))
     const files = missing.length ? new Map((await this.drive.list()).map((file) => [file.name, file.id])) : new Map<string, string>()
     const thumbs: Record<ThumbId, string> = {}
-    await this.transfer(missing, async (id) => {
+    await this.transfer(missing, READS, async (id) => {
       const file = files.get(thumbName(id))
       if (file) thumbs[id] = await this.drive.read(file) // gone from Drive: the spark goes without
     })
@@ -329,6 +336,7 @@ export class Sync {
     const images = await this.store.thumbs(missing)
     await this.transfer(
       [...images].filter(([, src]) => src),
+      WRITES,
       async ([id, src]) => {
         await this.drive.create(thumbName(id), src)
       }

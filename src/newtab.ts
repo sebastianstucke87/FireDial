@@ -1298,6 +1298,32 @@ async function importFile(file: File): Promise<string> {
   return importSummary(backup.views.filter((view) => view.kind === 'normal').length, sparks.length, backup.skipped)
 }
 
+// Steps that can take a while (the backup goes to Drive too) behind the import modal, which closes
+// by itself when they're done. A failure stays in it with its reason: null.
+async function withProgress<T>(title: string, run: () => Promise<T>): Promise<T | null> {
+  const closed = openWork(title, '')
+  try {
+    const result = await run()
+    importModal.close()
+    await closed
+    return result
+  } catch (error) {
+    endImport(`${title} failed`, errorText(error), 'Close')
+    await closed
+    return null
+  }
+}
+
+// The import modal with a running bar and what's going on: closed by its caller.
+function openWork(title: string, detail: string): Promise<string> {
+  importModal.title = title
+  importModal.dismissible = false
+  importProgress.hidden = false
+  importDone.hidden = true
+  showImport(detail)
+  return importModal.open()
+}
+
 // The page follows after Done, so the modal keeps its look until then.
 async function runImport(file: File): Promise<void> {
   importModal.title = 'Importing'
@@ -2615,29 +2641,33 @@ async function resetSettings(): Promise<void> {
 
 // The bookmarks in the FireDial folder go too: left there, they would come back as sparks.
 async function deleteEverything(): Promise<void> {
-  try {
-    const saved = await autoBackup('deleted')
+  const saved = await withProgress('Delete all', async () => {
+    showImport('Saving a backup')
+    const backedUp = await autoBackup('deleted')
+    showImport('Deleting')
     await replaceData({ views: [], sparks: [], prefs: { ...DEFAULT_PREFS } })
-    setEditing(false)
-    await afterChange()
-    if (saved) notify('Backup saved')
-  } catch (error) {
-    notify(errorText(error))
-  }
+    return backedUp
+  })
+  if (saved === null) return
+  setEditing(false)
+  await afterChange()
+  if (saved) notify('Backup saved')
 }
 
 // As a fresh install: the sparks in defaults.json and the default settings.
 async function startOver(): Promise<void> {
-  try {
+  const saved = await withProgress('Start over', async () => {
     const defaults = readBackup(await (await fetch(browser.runtime.getURL('defaults.json'))).text())
-    const saved = await autoBackup('replaced')
+    showImport('Saving a backup')
+    const backedUp = await autoBackup('replaced')
+    showImport('Starting over')
     await replaceData(defaults)
-    setEditing(false)
-    await afterChange()
-    if (saved) notify('Backup saved')
-  } catch (error) {
-    notify(errorText(error))
-  }
+    return backedUp
+  })
+  if (saved === null) return
+  setEditing(false)
+  await afterChange()
+  if (saved) notify('Backup saved')
 }
 
 async function start(): Promise<void> {
@@ -2673,7 +2703,10 @@ async function init(): Promise<void> {
   if (revealing !== null) revealSpark(revealing)
   store.watch(() => void followStore())
   void loadEngines()
-  initSync(confirm, askFromAbout)
+  initSync(confirm, askFromAbout, {
+    open: (title, detail) => void openWork(title, detail),
+    close: () => importModal.close()
+  })
 }
 
 void init()

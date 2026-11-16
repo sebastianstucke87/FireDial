@@ -19,11 +19,17 @@ const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
 // Easy to take back: both sides keep everything, so a plain question.
-const STOP_SYNC = { title: 'Stop sync', text: 'Stop sync? This browser and your Google Drive keep their sparks.', button: 'Stop sync', plain: true }
+const STOP_SYNC = {
+  title: 'Stop sync',
+  text: 'Stop syncing with Google Drive. This browser and Drive keep their sparks. To remove them from Drive click here.',
+  button: 'Stop sync',
+  plain: true,
+  link: 'click here'
+}
 
 const DELETE_FROM_DRIVE = {
   title: 'Delete from Drive',
-  text: 'Delete from Drive. This will delete all FireDial sparks, views and previews from your Google Drive, stop sync and remove FireDial’s access to Drive. This browser keeps them.',
+  text: 'Delete from Drive. This will delete all FireDial sparks, views and previews from your Google Drive and stop sync. This browser keeps them, as do the backups in the FireDial folder in Google Drive.',
   button: 'Delete from Drive'
 }
 
@@ -63,19 +69,34 @@ const Progress = z.catch(z.nullable(z.object({ done: z.number(), total: z.number
 
 // The card of Refresh previews, while many previews move (the first sync) or go (Delete from Drive).
 // Deleting goes a hundred at a time: until the first hundred are gone, the bar just runs.
+// What Delete from Drive shows on the page that asked: the same modal as Delete all.
+export interface Work {
+  open(title: string, detail: string): void
+  close(): void
+}
+
+let work: Work | null = null
+let deleteAsked: 'asked' | 'seen' | '' = '' // this page asked for Delete from Drive; its progress came
+
 async function showProgress(): Promise<void> {
   const progress = Progress.parse((await browserKeyValue.get('syncProgress'))['syncProgress'] ?? null)
-  html('#syncCard').hidden = !progress
+  if (deleteAsked && progress?.deleting) deleteAsked = 'seen'
+  else if (deleteAsked === 'seen' && !progress) {
+    deleteAsked = ''
+    work?.close()
+  }
+  html('#syncCard').hidden = !progress || deleteAsked !== ''
   if (!progress) return
   const { done, total, deleting } = progress
-  html('#syncCardText').textContent = deleting ? 'Deleting from Drive' : `Syncing previews: ${done} of ${total}`
+  html('#syncCardText').textContent = deleting ? 'Deleting from Drive' : `Syncing ${Math.floor((done / total) * 100)}%`
   const bar = $('#syncBar', HTMLProgressElement)
   if (deleting && !done) bar.removeAttribute('value')
   else bar.value = done / total
 }
 
 // askFromAbout: Delete from Drive is in About, whose questions take its place while they're asked.
-export function initSync(confirm: Confirm, askFromAbout: (question: Question, run: () => Promise<void>) => Promise<void>): void {
+export function initSync(confirm: Confirm, askFromAbout: (question: Question, run: () => Promise<void>) => Promise<void>, progress: Work): void {
+  work = progress
   const modal = new Modal($('#syncModal', HTMLDialogElement), 'Which sparks to keep?')
   const off = html('#syncOff')
   const on = html('#syncOn')
@@ -156,10 +177,14 @@ export function initSync(confirm: Confirm, askFromAbout: (question: Question, ru
       if (await start(state.email)) await send('now')
     },
     stop: async () => {
-      if (await confirm.ask(STOP_SYNC)) await send('stop')
+      const answer = await confirm.answer(STOP_SYNC)
+      if (answer === 'yes') await send('stop')
+      if (answer === 'link') await commands['delete']?.()
     },
     delete: () =>
       askFromAbout(DELETE_FROM_DRIVE, async () => {
+        deleteAsked = 'asked'
+        progress.open('Delete from Drive', 'Deleting')
         await send('delete')
       })
   }

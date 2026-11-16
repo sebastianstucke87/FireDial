@@ -83,9 +83,10 @@ export class GoogleDrive implements Drive {
     if (response.status === 401) response = await attempt(await this.auth.renew())
     if (response.status === 401) throw new SignInError('Google sign-in ran out')
     if (!response.ok) {
-      // Busy or down: like being offline, it passes.
-      if (response.status === 429 || response.status >= 500) throw new OfflineError(`Google Drive: ${response.status}`)
-      throw new Error(`Google Drive: ${response.status} ${await response.text()}`)
+      // Busy or down: like being offline, it passes. Drive says "too many" as a 403 too.
+      const text = await response.text()
+      if (response.status === 429 || response.status >= 500 || /rateLimitExceeded/i.test(text)) throw new OfflineError(`Google Drive: ${response.status}`)
+      throw new Error(`Google Drive: ${response.status} ${text}`)
     }
     return response
   }
