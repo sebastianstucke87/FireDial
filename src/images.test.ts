@@ -17,7 +17,8 @@ test('a blob becomes a data URL of its type and bytes', async () => {
 test('a blob larger than one chunk keeps every byte', async () => {
   const bytes = new Uint8Array(0x8000 * 2 + 5).map((_, index) => index % 256)
   const url = await blobToDataUrl(new Blob([bytes], { type: 'image/webp' }))
-  assert.deepEqual(new Uint8Array(Buffer.from(url.split(',')[1] ?? '', 'base64')), bytes)
+  // Compared as text: a failing deepEqual of 65k bytes builds a diff that takes gigabytes.
+  assert.equal(url, `data:image/webp;base64,${Buffer.from(bytes).toString('base64')}`)
 })
 
 test('a blob without a type is still a data URL', async () => {
