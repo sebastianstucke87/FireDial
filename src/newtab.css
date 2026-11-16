@@ -694,6 +694,11 @@ input::placeholder {
   box-shadow: var(--shadow);
   color: var(--text);
   text-decoration: none;
+  transition: transform 0.15s;
+}
+
+.Sparks .Spark:hover {
+  transform: translateY(-2px);
 }
 
 .Thumb {

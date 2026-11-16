@@ -91,15 +91,15 @@ jobs:
         if: env.RELEASE != 'true'
         with:
           path: reports/stryker-incremental.json
-          key: stryker-${{ github.sha }}
-          restore-keys: stryker-
+          key: stryker2-${{ github.sha }}
+          restore-keys: stryker2-
       - id: mutate
         run: npm run mutate
       - uses: actions/cache/save@v6.1.0
         if: always() && steps.mutate.outcome != 'skipped' && hashFiles('reports/stryker-incremental.json') != ''
         with:
           path: reports/stryker-incremental.json
-          key: stryker-${{ github.sha }}
+          key: stryker2-${{ github.sha }}
 
   # The AMO keys live in the environment amo, which only v* tags may use. Runs once the release
   # job tested the tag, builds it the same way and submits it. Listed versions need review, usually
