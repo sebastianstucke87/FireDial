@@ -52,6 +52,7 @@ To load it in Chrome:
 - FireDial collects no data: [privacy policy](PRIVACY.md). Sync is optional and goes to your own Google Drive.
 - FireDial is not for sale.
 - FireDial is published at:
+  - Website: [firedial.org](https://firedial.org/)
   - GitHub: [github.com/sebastianstucke87/FireDial](https://github.com/sebastianstucke87/FireDial)
   - Google, Chrome Web Store: [chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk](https://chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk)
   - Mozilla, Firefox Add-ons: [addons.mozilla.org/firefox/addon/firedial](https://addons.mozilla.org/firefox/addon/firedial)

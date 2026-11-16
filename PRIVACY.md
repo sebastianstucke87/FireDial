@@ -42,6 +42,7 @@ If you used Sync, "Delete from Drive" in FireDial's settings deletes the sparks,
 
 FireDial is published at:
 
+- Website: [firedial.org](https://firedial.org/)
 - GitHub: [github.com/sebastianstucke87/FireDial](https://github.com/sebastianstucke87/FireDial)
 - Google, Chrome Web Store: [chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk](https://chromewebstore.google.com/detail/khflkpkeicdbceieebokdclnedonmphk)
 - Mozilla, Firefox Add-ons: [addons.mozilla.org/firefox/addon/firedial](https://addons.mozilla.org/firefox/addon/firedial)
