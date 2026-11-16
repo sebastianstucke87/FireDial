@@ -105,6 +105,7 @@ jobs:
   # job tested the tag, builds it the same way and submits it. Listed versions need review, usually
   # automatic; waiting for it could outlast this job, so submit and finish.
   amo:
+    name: Firefox Add-ons
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
@@ -130,7 +131,8 @@ jobs:
 
   # The Chrome Web Store's keys live in the environment chrome-web-store, which only v* tags may
   # use. Runs once the release job tested the tag, builds it the same way and submits it for review.
-  chrome-web-store:
+  cws:
+    name: Chrome Web Store
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
