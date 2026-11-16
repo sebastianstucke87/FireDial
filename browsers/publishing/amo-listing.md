@@ -62,7 +62,7 @@ MIT
 
 ## Privacy policy
 
-A link to the site's copy of `PRIVACY.md`: the field mangles Markdown.
+A link to the privacy policy on the site: the field mangles Markdown.
 
 ```text
 FireDial collects no data. Optional Sync keeps your sparks in your own Google Drive. Its privacy policy: https://firedial.org/privacy.html

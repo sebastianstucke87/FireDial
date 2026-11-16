@@ -50,7 +50,7 @@ To load it until Firefox restarts:
 
 ## Trust
 
-- FireDial collects no data: [privacy policy](PRIVACY.md). Sync is optional and goes to your own Google Drive.
+- FireDial collects no data: [privacy policy](https://firedial.org/privacy.html). Sync is optional and goes to your own Google Drive.
 - FireDial is not for sale.
 - FireDial is published at:
   - Website: [firedial.org](https://firedial.org/)
