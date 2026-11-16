@@ -42,7 +42,7 @@ English
 
 ### Homepage URL
 
-https://firedial-app.github.io/
+https://firedial.org/
 
 ### Support URL
 
@@ -82,7 +82,7 @@ Nothing collected by the developer. Sync is optional: it sends the user's sparks
 
 ### Privacy policy URL
 
-https://firedial-app.github.io/privacy.html
+https://firedial.org/privacy.html
 
 ## Distribution
 

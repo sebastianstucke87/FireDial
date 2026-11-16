@@ -46,7 +46,7 @@ search, privacy (AMO's fixed list has nothing closer; categories carry Tabs and 
 
 ## Homepage
 
-https://firedial-app.github.io/
+https://firedial.org/
 
 ## Support site
 
@@ -65,7 +65,7 @@ MIT
 A link to the site's copy of `PRIVACY.md`: the field mangles Markdown.
 
 ```text
-FireDial collects no data. Optional Sync keeps your sparks in your own Google Drive. Its privacy policy: https://firedial-app.github.io/privacy.html
+FireDial collects no data. Optional Sync keeps your sparks in your own Google Drive. Its privacy policy: https://firedial.org/privacy.html
 ```
 
 ## Screenshots
