@@ -29,7 +29,9 @@ FireDial turns your new tab into a speed dial of your bookmarks, in views. Add a
 
 Pick a layout, columns, light or dark and an accent color. Search, undo, backups.
 
-No ads, no account, no tracking. Your sparks are Firefox bookmarks, so Sync carries them. Open source: https://github.com/sebastianstucke87/FireDial
+Optional Sync keeps FireDial the same in Firefox and Chrome, through your own Google Drive.
+
+No ads, no account, no tracking. Your sparks are Firefox bookmarks, so Firefox Sync carries them. Open source: https://github.com/sebastianstucke87/FireDial
 
 Enjoy your new tab!
 ```
@@ -44,7 +46,7 @@ search, privacy (AMO's fixed list has nothing closer; categories carry Tabs and 
 
 ## Homepage
 
-https://github.com/sebastianstucke87/FireDial
+https://firedial-app.github.io/
 
 ## Support site
 
@@ -60,10 +62,10 @@ MIT
 
 ## Privacy policy
 
-A link to `PRIVACY.md`: the field mangles Markdown, and one copy stays in step by itself.
+A link to the site's copy of `PRIVACY.md`: the field mangles Markdown.
 
 ```text
-FireDial collects no data. Optional Sync keeps your sparks in your own Google Drive. Its privacy policy: https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
+FireDial collects no data. Optional Sync keeps your sparks in your own Google Drive. Its privacy policy: https://firedial-app.github.io/privacy.html
 ```
 
 ## Screenshots

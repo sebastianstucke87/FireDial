@@ -11,6 +11,8 @@ FireDial turns your new tab into a speed dial of your bookmarks, in views. Add a
 
 Pick a layout, columns, light or dark and an accent color. Search, undo, backups.
 
+Optional Sync keeps FireDial the same in Firefox and Chrome, through your own Google Drive.
+
 No ads, no account, no tracking. Your sparks are Chrome bookmarks, so Chrome sync carries them. Open source: https://github.com/sebastianstucke87/FireDial
 
 Enjoy your new tab!
@@ -40,7 +42,7 @@ English
 
 ### Homepage URL
 
-https://github.com/sebastianstucke87/FireDial
+https://firedial-app.github.io/
 
 ### Support URL
 
@@ -76,11 +78,11 @@ No, I am not using remote code.
 
 ### Data usage
 
-Nothing collected by the developer. Sync is optional: it sends the user's sparks, settings and previews to their own Google Drive app folder (scope `drive.appdata`) and nowhere else. Tick "Website content" (previews) and the three certifications.
+Nothing collected by the developer. Sync is optional: it sends the user's sparks, settings and previews to their own Google Drive app folder (scope `drive.appdata`) and the backups to a FireDial folder in their Drive (scope `drive.file`), nowhere else. Tick "Website content" (previews) and the three certifications.
 
 ### Privacy policy URL
 
-https://github.com/sebastianstucke87/FireDial/blob/main/PRIVACY.md
+https://firedial-app.github.io/privacy.html
 
 ## Distribution
 

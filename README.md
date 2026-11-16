@@ -22,7 +22,7 @@ Minimal speed dial for your bookmarks in Firefox and Chrome! Completely free and
 - Right-click a page or link (in Firefox also a tab): **Add to FireDial**.
 - **Edit**: settings. **About**: shortcuts, bookmark import.
 - Views filter sparks by label, e.g. _Work or News_, _all but Private_.
-- Sparks are bookmarks (**Other Bookmarks → FireDial**), so the browser's sync carries them. Images stay local.
+- Sparks are bookmarks (**Other Bookmarks → FireDial**), so the browser's sync carries them. Previews stay local, unless you turn on Sync (your own Google Drive).
 
 ## Build
 
