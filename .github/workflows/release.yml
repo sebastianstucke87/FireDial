@@ -100,6 +100,23 @@ jobs:
         with:
           path: reports/stryker-incremental.json
           key: stryker2-${{ github.sha }}
+      # The report as one self-contained HTML file on the run page, also when the bar is missed.
+      # Named date_commit_mutation.html; a pull request names its own head commit, not the merge commit.
+      # Unarchived, the artifact takes the file's name, so the file is copied to that name.
+      - name: Name the mutation report
+        if: always() && steps.mutate.outcome != 'skipped'
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          name="$(date -u +%F)_${SHA::7}_mutation.html"
+          mkdir -p reports/upload
+          [ -f reports/mutation.html ] && cp reports/mutation.html "reports/upload/$name" || true
+      - uses: actions/upload-artifact@v7.0.2
+        if: always() && steps.mutate.outcome != 'skipped'
+        with:
+          path: reports/upload/*_mutation.html
+          archive: false
+          if-no-files-found: warn
 
   # The AMO keys live in the environment amo, which only v* tags may use. Runs once the release
   # job tested the tag, builds it the same way and submits it. Listed versions need review, usually
