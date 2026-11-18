@@ -100,6 +100,14 @@ jobs:
         with:
           path: reports/stryker-incremental.json
           key: stryker2-${{ github.sha }}
+      # The report as one self-contained HTML file on the run page, also when the bar is missed.
+      - uses: actions/upload-artifact@v7.0.2
+        if: always() && steps.mutate.outcome != 'skipped'
+        with:
+          name: mutation.html
+          path: reports/mutation.html
+          archive: false
+          if-no-files-found: warn
 
   # The AMO keys live in the environment amo, which only v* tags may use. Runs once the release
   # job tested the tag, builds it the same way and submits it. Listed versions need review, usually
