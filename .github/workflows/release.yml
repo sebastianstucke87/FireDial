@@ -101,10 +101,16 @@ jobs:
           path: reports/stryker-incremental.json
           key: stryker2-${{ github.sha }}
       # The report as one self-contained HTML file on the run page, also when the bar is missed.
+      # Named date_commit_mutation.html; a pull request names its own head commit, not the merge commit.
+      - id: report
+        if: always() && steps.mutate.outcome != 'skipped'
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "name=$(date -u +%F)_${SHA::7}_mutation.html" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7.0.2
         if: always() && steps.mutate.outcome != 'skipped'
         with:
-          name: mutation.html
+          name: ${{ steps.report.outputs.name }}
           path: reports/mutation.html
           archive: false
           if-no-files-found: warn
