@@ -640,6 +640,9 @@ function renderBulk(): void {
   labelBulk.hidden = !editing || !selection.size
   refreshBulk.hidden = !editing || !selection.size
   html('span', refreshBulk).textContent = selection.size > 1 ? 'Refresh previews' : 'Refresh preview'
+  const withPreview = store.doc.sparks.filter((spark) => selection.has(spark.id) && spark.thumb).length
+  clearBulk.hidden = !editing || !withPreview
+  html('span', clearBulk).textContent = withPreview > 1 ? 'Clear previews' : 'Clear preview'
   removeButton.hidden = !editing || !selection.size || view?.kind !== 'normal' || Boolean(query)
   html('span', removeButton).textContent = view ? `Remove from ${view.title}` : 'Remove'
 }
@@ -764,6 +767,15 @@ async function removeFromActive(ids: ReadonlySet<SparkId>): Promise<void> {
 }
 
 // Puts the sparks before or after the target spark in the open view's order; without a target, at its end.
+// The previews go, as one step to undo: the sparks show their site's icon instead.
+function clearPreviews(sparks: readonly Spark[]): Promise<void> {
+  const ids = new Set(sparks.map((spark) => spark.id))
+  return change((doc) => {
+    for (const spark of doc.sparks) if (ids.has(spark.id)) spark.thumb = null
+    return undefined
+  })
+}
+
 function reorderSparks(ids: ReadonlySet<SparkId>, targetId: SparkId | null, after: boolean): Promise<void> {
   const viewId = active
   return change((doc) => {
@@ -1427,6 +1439,7 @@ function oneSparkMenu(spark: Spark): MenuEntry[] {
     { icon: 'edit', label: 'Edit spark', run: () => void openSparkModal(spark) },
     ...(editing ? [labels, fromThese] : []),
     { icon: 'image', label: 'Refresh preview', run: () => void refreshPreviews([spark]) },
+    ...(spark.thumb ? [{ icon: 'image-off', label: 'Clear preview', run: () => void clearPreviews([spark]) }] : []),
     copy,
     { icon: 'trash', label: 'Delete', run: () => void deleteSpark(spark) }
   ]
@@ -1443,6 +1456,7 @@ function markedMenu(sparks: readonly Spark[]): MenuEntry[] {
     { icon: 'tag', label: 'Labels', run: () => void openLabelModal() },
     ...(first ? [{ icon: 'plus', label: 'Add view', run: () => void newViewFrom(first) }] : []),
     { icon: 'image', label: 'Refresh previews', run: () => void refreshPreviews(sparks) },
+    ...(sparks.some((spark) => spark.thumb) ? [{ icon: 'image-off', label: 'Clear previews', run: () => void clearPreviews(sparks) }] : []),
     { icon: 'trash', label: `Delete ${count}`, run: () => void deleteItems(new Set(sparks.map((spark) => spark.id)), new Set()) }
   ]
 }
@@ -1905,6 +1919,7 @@ document.addEventListener('dragend', endDrag)
 const labelBulk = $('#labelBulk', HTMLButtonElement)
 const removeButton = $('#removeFromView', HTMLButtonElement)
 const refreshBulk = $('#refreshBulk', HTMLButtonElement)
+const clearBulk = $('#clearBulk', HTMLButtonElement)
 const trash = html('#trash')
 
 async function throwAway(dragged: Drag): Promise<void> {
@@ -2041,6 +2056,7 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
     refreshing?.abort()
   },
   'refresh-bulk': () => void refreshPreviews(store.doc.sparks.filter((spark) => selection.has(spark.id))),
+  'clear-bulk': () => void clearPreviews(store.doc.sparks.filter((spark) => selection.has(spark.id))),
   'import-bookmarks': () => void importBookmarks(),
   export: () => void exportData(),
   import: () => void askImport(),
