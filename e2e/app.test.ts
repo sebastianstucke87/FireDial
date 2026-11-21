@@ -315,7 +315,7 @@ test('the spark modal has sections like the sidebar, and says Add for a new spar
     await js(
       "return [...document.querySelectorAll('#sparkModal .Field')].map((field) => [field.textContent, field.querySelector('input').placeholder].join())"
     ),
-    ['Add name,Title', 'Add URL,URL']
+    ['Name,Add name', 'URL,Add URL']
   )
   assert.equal(await text('[data-action="clear-thumb"]'), 'Clear')
   const edges = await js<string[]>(`
@@ -504,7 +504,7 @@ test('Esc takes back what was typed in place', async () => {
   await until('the plus again', () => js("return document.querySelector('.AddSpark input') === null"))
   assert.equal(await sparkCount(), 2)
   await click('#newGroup')
-  assert.equal(await js("return document.querySelector('.NewGroupInput').placeholder"), 'Name view')
+  assert.equal(await js("return document.querySelector('.NewGroupInput').placeholder"), 'Add name')
   await press('Nothing', Key.ESCAPE)
   await until('the button again', () => js("return document.querySelector('#newGroup') !== null"))
   assert.equal(await js("return document.querySelectorAll('.Group').length"), 2)

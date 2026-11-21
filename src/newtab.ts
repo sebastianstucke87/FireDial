@@ -7,7 +7,7 @@ import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
-import { blobToDataUrl, isStoredImage, readImage, siteAccess } from './images.ts'
+import { blobToDataUrl, faviconPath, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
   accentOf,
@@ -589,19 +589,22 @@ function openAddTile(tile: HTMLElement): void {
   input.focus()
 }
 
-function addSparkFromUrl(text: string): Promise<void> {
+async function addSparkFromUrl(text: string): Promise<void> {
   const url = toSparkUrl(normalizeUrl(text))
   if (!url) {
     notify('Not added: the URL is too long')
     return renderSparks()
   }
   const viewId = active
-  return change((doc) => {
+  const added: SparkId[] = []
+  await change((doc) => {
     const spark = allocSpark(doc, { title: toLabel(titleFromUrl(url)), url, thumb: null })
+    added.push(spark.id)
     const view = doc.views.find((each) => each.id === viewId)
     if (view) addTo([spark], view)
     return undefined
   })
+  await loadSparkIcons(new Set(added))
 }
 
 // Selection and edit mode
@@ -830,7 +833,7 @@ const viewSort = new Dropdown<Sort>(html('#viewSort'), 'Sort', setSort)
 function startNewGroup(): void {
   const button = html('#newGroup')
   if (!button.isConnected) return
-  const input = el('input', { class: 'NewGroupInput', placeholder: 'Name view', maxlength: LIMITS.label, 'aria-label': 'Name view' })
+  const input = el('input', { class: 'NewGroupInput', placeholder: 'Add name', maxlength: LIMITS.label, 'aria-label': 'View name' })
   button.replaceWith(input)
   input.focus()
   editable(
@@ -1595,7 +1598,6 @@ function renderPreview(): void {
   refreshThumb.disabled = capturing || !originOf(normalizeUrl(preview.url))
   refreshTitleClear()
   refreshUrlClear()
-  titleField.placeholder = hostOf(preview.url) || 'Title'
 }
 
 async function setDraftImage(file: File | undefined): Promise<void> {
@@ -1683,15 +1685,18 @@ async function openSparkModal(spark?: Spark): Promise<void> {
   const thumb = src === srcBefore ? (spark?.thumb ?? null) : newThumb
   if (newThumb) thumbs.set(newThumb, src)
   const labels = [...sparkLabels.values]
+  const saved: SparkId[] = []
   await change(
     (doc) => {
       const target = doc.sparks.find((item) => item.id === spark?.id)
       if (target) Object.assign(target, { title, url, thumb, labels })
-      else allocSpark(doc, { title, url, thumb, labels })
+      saved.push((target ?? allocSpark(doc, { title, url, thumb, labels })).id)
       return undefined
     },
     newThumb ? { thumbs: { [newThumb]: src } } : {}
   )
+  // Without a preview, the site's icon instead, where the browser has it or site access is allowed.
+  if (!thumb) await loadSparkIcons(new Set(saved))
 }
 
 // No usable URL, no save: mark the field instead of a browser tooltip. Registered before the modal's listener.
@@ -2285,19 +2290,47 @@ async function iconImage(response: Response): Promise<string | null> {
 
 const originsOf = (sparks: readonly Spark[]): string[] => [...new Set(sparks.map((spark) => originOf(spark.url)).filter((origin) => origin !== null))]
 
+// Chrome keeps the icons of sites it has been to, which need no site access. For any other site
+// it gives its own globe, which isn't the site's icon.
+let globe: Promise<string> | null = null
+async function browserIcon(url: string): Promise<string> {
+  if (!IS_CHROME) return ''
+  const read = async (page: string): Promise<string> => {
+    try {
+      const response = await fetch(browser.runtime.getURL(faviconPath(page, 64)))
+      return response.ok ? await blobToDataUrl(await response.blob()) : ''
+    } catch {
+      return ''
+    }
+  }
+  globe ??= read('https://example.invalid/')
+  const icon = await read(url)
+  return isStoredImage(icon) && icon !== (await globe) ? icon : ''
+}
+
+// Icons for sparks without a preview: the browser's own first, then from the sites, if allowed.
 async function loadSparkIcons(ids: ReadonlySet<SparkId>): Promise<void> {
   const wanted = store.doc.sparks.filter((spark) => ids.has(spark.id) && !spark.thumb)
-  const origins = originsOf(wanted)
-  if (!origins.length) return
-  const icons = await loadIcons(origins, iconImage)
+  const found = new Map<SparkId, string>()
+  for (const spark of wanted) {
+    const icon = await browserIcon(spark.url)
+    if (icon) found.set(spark.id, icon)
+  }
+  const rest = wanted.filter((spark) => !found.has(spark.id))
+  const origins = originsOf(rest)
+  if (origins.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
+    const icons = await loadIcons(origins, iconImage)
+    for (const spark of rest) {
+      const origin = originOf(spark.url)
+      const src = origin ? icons.get(origin) : undefined
+      if (src) found.set(spark.id, src)
+    }
+  }
   const chosen = new Map<SparkId, ThumbId>()
   const images: Record<ThumbId, string> = {}
-  for (const spark of wanted) {
-    const origin = originOf(spark.url)
-    const src = origin ? icons.get(origin) : undefined
-    if (!src) continue
+  for (const [sparkId, src] of found) {
     const id = newThumbId()
-    chosen.set(spark.id, id)
+    chosen.set(sparkId, id)
     images[id] = src
     thumbs.set(id, src)
   }
