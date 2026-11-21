@@ -1737,6 +1737,11 @@ body.editing .Sparks .Spark {
   display: block;
 }
 
+.Field__label {
+  display: block;
+  margin-bottom: 4px;
+}
+
 .Field--invalid .Input {
   border-color: #dc2626;
 }

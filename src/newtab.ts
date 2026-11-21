@@ -570,7 +570,7 @@ function addTile(): HTMLElement {
 function openAddTile(tile: HTMLElement): void {
   if (tile.classList.contains('AddSpark--editing')) return
   tile.classList.add('AddSpark--editing')
-  const input = el('input', { placeholder: 'Paste URL', autocomplete: 'off', spellcheck: false, maxlength: LIMITS.url, 'aria-label': 'URL' })
+  const input = el('input', { placeholder: 'Add URL', autocomplete: 'off', spellcheck: false, maxlength: LIMITS.url, 'aria-label': 'URL' })
   html('.Plus', tile).replaceWith(input)
   // Later, not at once: a click may be on its way to what's under the mouse.
   const close = (): void => {

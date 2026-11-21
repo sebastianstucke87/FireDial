@@ -315,7 +315,7 @@ test('the spark modal has sections like the sidebar, and says Add for a new spar
     await js(
       "return [...document.querySelectorAll('#sparkModal .Field')].map((field) => [field.textContent, field.querySelector('input').placeholder].join())"
     ),
-    [',Title', ',URL']
+    ['Add name,Title', 'Add URL,URL']
   )
   assert.equal(await text('[data-action="clear-thumb"]'), 'Clear')
   const edges = await js<string[]>(`
