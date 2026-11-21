@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { allocView, emptyDoc, LimitError, LIMITS, moveView, SparkId } from './model.ts'
+import { allocView, emptyDoc, LimitError, LIMITS, moveViews, SparkId } from './model.ts'
 import {
   addTo,
   arrange,
@@ -262,19 +262,32 @@ test('views move before or after another in the sidebar; unknown ids change noth
   const [a, b, c] = ['A', 'B', 'C'].map((title) => allocView(doc, title))
   assert.ok(a && b && c)
   const order = (): string[] => doc.views.map((each) => each.title)
-  moveView(doc, c.id, a.id, false)
+  moveViews(doc, [c.id], a.id, false)
   assert.deepEqual(order(), ['All', 'Unlabeled', 'C', 'A', 'B'])
-  moveView(doc, c.id, b.id, true)
+  moveViews(doc, [c.id], b.id, true)
   assert.deepEqual(order(), ['All', 'Unlabeled', 'A', 'B', 'C'])
-  moveView(doc, a.id, ViewId.parse(0), false)
+  moveViews(doc, [a.id], ViewId.parse(0), false)
   assert.deepEqual(order(), ['A', 'All', 'Unlabeled', 'B', 'C'])
   for (const [id, target] of [
     [a.id, a.id],
     [ViewId.parse(99), b.id],
     [b.id, ViewId.parse(99)]
   ] as const)
-    moveView(doc, id, target, true)
+    moveViews(doc, [id], target, true)
   assert.deepEqual(order(), ['A', 'All', 'Unlabeled', 'B', 'C'])
+})
+
+test('marked views move together, in their order, wherever they were', () => {
+  const doc = { ...emptyDoc(), sparks: [] }
+  const [a, b, c, d] = ['A', 'B', 'C', 'D'].map((title) => allocView(doc, title))
+  assert.ok(a && b && c && d)
+  const order = (): string[] => doc.views.map((each) => each.title)
+  moveViews(doc, [d.id, b.id], a.id, false)
+  assert.deepEqual(order(), ['All', 'Unlabeled', 'B', 'D', 'A', 'C'])
+  moveViews(doc, [b.id, d.id], c.id, true)
+  assert.deepEqual(order(), ['All', 'Unlabeled', 'A', 'C', 'B', 'D'])
+  moveViews(doc, [a.id, c.id], c.id, true)
+  assert.deepEqual(order(), ['All', 'Unlabeled', 'A', 'C', 'B', 'D'], 'onto a moving one: nothing')
 })
 
 test('a move onto one of the moving sparks, or before the first one, changes nothing', () => {

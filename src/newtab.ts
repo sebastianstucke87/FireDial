@@ -38,7 +38,7 @@ import {
   MIN_COLUMNS,
   MIN_GROUP_WIDTH,
   moveInView,
-  moveView,
+  moveViews,
   newThumbId,
   isBlocked,
   nextViewName,
@@ -791,9 +791,11 @@ function renameViewTo(id: ViewId, text: string): Promise<void> {
   })
 }
 
+// A marked view takes the other marked ones along.
 function reorderView(id: ViewId, targetId: ViewId, after: boolean): Promise<void> {
+  const ids = markedViews.has(id) ? [...markedViews] : [id]
   return change((doc) => {
-    moveView(doc, id, targetId, after)
+    moveViews(doc, ids, targetId, after)
     return undefined
   })
 }
@@ -1337,8 +1339,8 @@ async function runImport(file: File): Promise<void> {
   } catch (error) {
     endImport('Import failed', errorText(error), 'Close')
   }
+  await afterChange() // behind the result, so it's there to see before Done
   await closed
-  await afterChange()
 }
 
 const importInput = $('#importFile', HTMLInputElement)
@@ -1853,13 +1855,15 @@ groupsNav.addEventListener('dragstart', (event) => {
   }
   requestAnimationFrame(() => {
     viewEl.classList.add('Group--dragging')
+    if (markedViews.has(id)) for (const row of $$('.Group--marked', Element)) row.classList.add('Group--dragging')
   })
 })
 
 groupsNav.addEventListener('dragover', (event) => {
   const over = closest(event, '.Group')
   if (!drag || !over) return
-  if (drag.type === 'view' && viewIdOf(over) === drag.id) return
+  const overId = viewIdOf(over)
+  if (drag.type === 'view' && (overId === drag.id || (overId !== null && markedViews.has(drag.id) && markedViews.has(overId)))) return
   event.preventDefault()
   clearDropMarks()
   if (drag.type === 'spark') over.classList.add('Group--drop')

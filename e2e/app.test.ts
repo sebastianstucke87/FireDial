@@ -15,6 +15,7 @@ import * as z from 'zod/mini'
 import { installFireDial, NEWTAB, startFirefox, until as untilIn } from './firefox.ts'
 
 const OCEAN = 'rgb(29, 78, 216)'
+const TEAL = 'rgb(15, 118, 110)'
 
 const server = createServer((request, response) => {
   response.setHeader('content-type', 'text/html')
@@ -666,7 +667,7 @@ test('Import asks first, then opens the file picker with the click still countin
   assert.equal(await js('return window.pickerAllowed'), true)
 })
 
-test('Import saves a backup first, stays in the selected color, sums up and leaves nothing to undo', async () => {
+test('Import saves a backup first, sums up over the result already shown, and leaves nothing to undo', async () => {
   await home()
   await edit()
   await click('[data-setting="color"] [data-value="ocean"]')
@@ -694,10 +695,9 @@ test('Import saves a backup first, stays in the selected color, sums up and leav
   const colors = await js<string[]>(`
     const modal = document.querySelector('#importModal')
     return [getComputedStyle(modal.querySelector('.Modal__title .icon')).color, getComputedStyle(modal.querySelector('#importDone')).borderTopColor]`)
-  assert.deepEqual(colors, [OCEAN, OCEAN])
+  assert.deepEqual(colors, [TEAL, TEAL], 'the imported color, behind the result too')
+  assert.equal(await sparkCount(), 3, 'the sparks before Done')
   await click('#importDone')
-  await until('the imported color', () => js("return document.documentElement.dataset.color === 'teal'"))
-  await until('the sparks', async () => (await sparkCount()) === 3)
   assert.equal(await canUndo(), false)
   await js("document.querySelectorAll('.Group')[3].click()")
   await until(

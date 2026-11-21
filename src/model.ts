@@ -517,14 +517,14 @@ export function deleteView<S extends Item>(shelf: Shelf<S>, view: View, withSpar
   return gone
 }
 
-// Moves a view before or after another one in the sidebar.
-export function moveView(doc: Doc, id: ViewId, target: ViewId, after: boolean): void {
-  const view = doc.views.find((each) => each.id === id)
-  if (!view || id === target) return
-  const rest = doc.views.filter((each) => each !== view)
+// Moves views before or after another one in the sidebar, together and in their order.
+export function moveViews(doc: Doc, ids: readonly ViewId[], target: ViewId, after: boolean): void {
+  const moving = new Set(ids)
+  if (moving.has(target)) return
+  const rest = doc.views.filter((each) => !moving.has(each.id))
   const at = rest.findIndex((each) => each.id === target)
   if (at < 0) return
-  rest.splice(after ? at + 1 : at, 0, view)
+  rest.splice(after ? at + 1 : at, 0, ...doc.views.filter((each) => moving.has(each.id)))
   doc.views = rest
 }
 

@@ -2194,10 +2194,18 @@ kbd {
 }
 
 /* Delete and Labels side by side on the left of the bars */
+
+/* narrow: the actions go on more rows rather than squeeze their words */
 .BarStart {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
   pointer-events: none;
+}
+
+.BarStart > * {
+  white-space: nowrap;
 }
 
 .LabelBulk {
