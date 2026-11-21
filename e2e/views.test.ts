@@ -204,9 +204,12 @@ test("a view's filter shows sparks by their labels, the grid follows while editi
   await pick('#ruleExclude', 'Work')
   await click('#ruleModal .Button--primary')
   await until('the saved filter', async () => (await sparkTitles()).join() === 'beta.example')
-  const views = await stored<{ title: string; rule: { include: string[]; exclude: string[] } }[]>('views')
-  const homeoffice = views.find((view) => view.title === 'Homeoffice')
-  assert.deepEqual([homeoffice?.rule.include, homeoffice?.rule.exclude], [['web'], ['Work']])
+  // The grid already showed it while editing: the save comes after.
+  await until('the filter stored', async () => {
+    const views = await stored<{ title: string; rule: { include: string[]; exclude: string[] } }[]>('views')
+    const homeoffice = views.find((view) => view.title === 'Homeoffice')
+    return JSON.stringify([homeoffice?.rule.include, homeoffice?.rule.exclude]) === JSON.stringify([['web'], ['Work']])
+  })
   await showView('Unlabeled')
   assert.deepEqual(await sparkTitles(), [], 'every spark has a label now')
 })

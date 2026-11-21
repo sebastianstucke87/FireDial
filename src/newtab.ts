@@ -2383,20 +2383,18 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
   try {
     const fromBrowser = await Promise.all(due.map(async (origin) => [origin, await browserIcon(pages.get(origin) ?? origin)] as const))
     for (const [origin, icon] of fromBrowser) if (icon) found.set(origin, icon)
-    if (which === 'browser') {
-      await siteIcons.save([...found.keys()], found) // the others stay as they were
-      return
-    }
-    await siteIcons.save([...found.keys()], found)
+    await keepIcons(found) // the others stay as they were, for now
+    if (which === 'browser') return
     const rest = due.filter((origin) => !found.has(origin) && !CLOSED_SITES.has(origin))
     if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
       // Shown in batches, not one by one: each one shown draws the sparks anew.
       let batch = new Map<string, string>()
-      const timer = setInterval(() => {
+      const show = (): Promise<void> => {
         const shown = batch
         batch = new Map()
-        void siteIcons.save([...shown.keys()], shown)
-      }, ICON_BATCH)
+        return keepIcons(shown)
+      }
+      const timer = setInterval(() => void show(), ICON_BATCH)
       showIconCard(0, rest.length)
       const fromSites = await loadIcons(rest, iconImage, {
         onDone: (done) => {
@@ -2408,9 +2406,10 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
       }).finally(() => {
         clearInterval(timer)
       })
+      await show()
       for (const [origin, src] of fromSites) found.set(origin, src)
     }
-    await siteIcons.save(due, found)
+    await siteIcons.save(due, found) // the ones without an icon: not asked again for a while
   } finally {
     for (const origin of due) lookingFor.delete(origin)
     iconCard.hidden = true
@@ -2418,6 +2417,13 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
 }
 
 const ICON_BATCH = 300 // ms of found icons shown together
+
+// Icons found: kept, and the sparks drawn anew with them. Nothing found draws nothing.
+async function keepIcons(found: ReadonlyMap<string, string>): Promise<void> {
+  if (!found.size) return
+  await siteIcons.save([...found.keys()], found)
+  await renderSparks()
+}
 
 // Firefox keeps no icons for add-ons: they come from the sites, which takes access to them. Asked
 // for by the click that makes sparks show icons; Chrome has its own copies of the sites visited.
@@ -2443,11 +2449,13 @@ document.addEventListener('visibilitychange', () => {
 // Site access just allowed: the sites found without an icon may have one after all.
 browser.permissions.onAdded.addListener(() => void findIcons(store.doc.sparks, 'all'))
 
+// Icons another tab found. This tab's own are known already, and a site without one changes nothing.
 browserKeyValue.onChanged((keys) => {
   const origins = [...keys].map(originOfKey).filter((origin) => origin !== null)
   if (!origins.length) return
+  const before = origins.map((origin) => siteIcons.get(origin))
   siteIcons.forget(origins)
-  void renderSparks()
+  void siteIcons.load(origins).then(() => (origins.some((origin, index) => siteIcons.get(origin) !== before[index]) ? renderSparks() : undefined))
 })
 
 // Previews, taken again: each page opens in a tab of its own, is captured once it has loaded, and
