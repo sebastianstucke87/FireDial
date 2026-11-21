@@ -95,7 +95,12 @@ async function showProgress(): Promise<void> {
 }
 
 // askFromAbout: Delete from Drive is in About, whose questions take its place while they're asked.
-export function initSync(confirm: Confirm, askFromAbout: (question: Question, run: () => Promise<void>) => Promise<void>, progress: Work): void {
+export function initSync(
+  confirm: Confirm,
+  askFromAbout: (question: Question, run: () => Promise<void>) => Promise<void>,
+  progress: Work,
+  notify: (text: string) => void
+): void {
   work = progress
   const modal = new Modal($('#syncModal', HTMLDialogElement), 'Which sparks to keep?')
   const off = html('#syncOff')
@@ -144,7 +149,9 @@ export function initSync(confirm: Confirm, askFromAbout: (question: Question, ru
   }
 
   async function refresh(): Promise<void> {
+    const was = state
     state = parseSyncState((await browserKeyValue.get('sync'))['sync'])
+    if (was.on && !state.on && state.problem) notify(state.problem) // sync stopped itself
     syncing = state.on
     account = state.email
     render()

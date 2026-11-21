@@ -2705,10 +2705,15 @@ async function init(): Promise<void> {
   if (revealing !== null) revealSpark(revealing)
   store.watch(() => void followStore())
   void loadEngines()
-  initSync(confirm, askFromAbout, {
-    open: (title, detail) => void openWork(title, detail),
-    close: () => importModal.close()
-  })
+  initSync(
+    confirm,
+    askFromAbout,
+    {
+      open: (title, detail) => void openWork(title, detail),
+      close: () => importModal.close()
+    },
+    notify
+  )
 }
 
 void init()

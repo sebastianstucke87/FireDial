@@ -13,7 +13,7 @@ interface Parsed extends ImportedData {
 
 const twoDigits = (value: number): string => String(value).padStart(2, '0')
 
-// firedial_1999-12-31_235959.json, in local time. auto: made before an import or a delete.
+// firedial_1999-12-31_235959.json, in local time. auto: made before an import, a delete or a sync choice.
 export function backupName(now: Date, auto: boolean): string {
   const date = `${now.getFullYear()}-${twoDigits(now.getMonth() + 1)}-${twoDigits(now.getDate())}`
   const time = [now.getHours(), now.getMinutes(), now.getSeconds()].map(twoDigits).join('')

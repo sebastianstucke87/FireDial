@@ -170,7 +170,7 @@ const PULL_COOLDOWN = 30_000 // ms
 const RETRY_DELAY = 60_000 // ms
 const SyncMessage = z.object({ sync: SyncCommand })
 const drive = new GoogleDrive(googleAuth(async () => (await driveSync.state()).email))
-const driveSync = new Sync(store, browserKeyValue, drive)
+const driveSync = new Sync(store, browserKeyValue, drive, Date.now, async (name, content) => drive.upload(name, content, await drive.folder('FireDial')))
 let pushTimer: ReturnType<typeof setTimeout> | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 
