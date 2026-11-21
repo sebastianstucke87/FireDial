@@ -28,6 +28,7 @@
   --surface-2: #ececee;
   --text: #18181b;
   --muted: #5f5f68;
+  --disabled: color-mix(in srgb, var(--text) 35%, var(--surface)); /* solid: nothing is see-through */
   --border: #e0e0e5;
   --on-accent: #fff;
   --off-accent: #000;
@@ -1060,12 +1061,10 @@ body.editing .Sparks .Spark {
   background: var(--accent-hover);
 }
 
-.History button:disabled {
-  cursor: default;
-}
-
+.History button:disabled,
 .History button:disabled .icon {
-  opacity: 0.35;
+  color: var(--disabled);
+  cursor: default;
 }
 
 /* Delete: a dashed place to drop things, as tall as the bars. A button once something is marked,
@@ -1490,7 +1489,7 @@ body.editing .Sparks .Spark {
 }
 
 .Button:disabled {
-  opacity: 0.5;
+  color: var(--disabled);
   cursor: default;
   pointer-events: none;
 }
@@ -1530,9 +1529,10 @@ body.editing .Sparks .Spark {
   outline: none;
 }
 
-.ContextMenu__item:disabled {
+.ContextMenu__item:disabled,
+.ContextMenu__item:disabled .icon {
   background: none;
-  opacity: 0.45;
+  color: var(--disabled);
   cursor: default;
 }
 
