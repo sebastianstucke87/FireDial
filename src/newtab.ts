@@ -770,12 +770,16 @@ async function removeFromActive(ids: ReadonlySet<SparkId>): Promise<void> {
 
 // Puts the sparks before or after the target spark in the open view's order; without a target, at its end.
 // The previews go, as one step to undo: the sparks show their site's icon instead.
-function clearPreviews(sparks: readonly Spark[]): Promise<void> {
+async function clearPreviews(sparks: readonly Spark[]): Promise<void> {
   const ids = new Set(sparks.map((spark) => spark.id))
-  return change((doc) => {
+  await change((doc) => {
     for (const spark of doc.sparks) if (ids.has(spark.id)) spark.thumb = null
     return undefined
   })
+  await findIcons(
+    store.doc.sparks.filter((spark) => ids.has(spark.id)),
+    true
+  )
 }
 
 function reorderSparks(ids: ReadonlySet<SparkId>, targetId: SparkId | null, after: boolean): Promise<void> {
@@ -2100,7 +2104,7 @@ document.addEventListener('click', (event) => {
     if (name === 'color') honeycombPanel.hidden = value !== 'custom' || !honeycombPanel.hidden
     void changePrefs((prefs) => {
       applySetting(prefs, name, value)
-    })
+    }).then(() => (name === 'previews' && value === 'icon' ? findIcons(store.doc.sparks, true) : undefined))
     return
   }
 
@@ -2384,6 +2388,9 @@ async function findIcons(sparks: readonly Spark[], force = false): Promise<void>
   if (found.size) await renderSparks()
 }
 
+// Site access just allowed: the sites found without an icon may have one after all.
+browser.permissions.onAdded.addListener(() => void findIcons(store.doc.sparks, true))
+
 browserKeyValue.onChanged((keys) => {
   const origins = [...keys].map(originOfKey).filter((origin) => origin !== null)
   if (!origins.length) return
@@ -2545,6 +2552,8 @@ async function refreshPreviews(sparks: readonly Spark[]): Promise<void> {
       { thumbs: images }
     )
   }
+  // The pages were just open: the browser has their icons now, and the sites let FireDial in.
+  void findIcons(wanted, true)
   // Cancelled ones aren't failures: the card going away says enough.
   if (chosen.size < tried) notify(chosen.size ? `Refreshed ${chosen.size} of ${plural(tried, 'preview')}` : 'No preview could be taken')
 }

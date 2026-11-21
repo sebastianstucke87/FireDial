@@ -135,3 +135,14 @@ test('a bookmark added in Firefox after an import is new to the next one', async
   )
   await js("document.querySelector('dialog[open] [data-close]').click()")
 })
+
+test('a site found without an icon lately is looked at again once Previews is set to Icon', async () => {
+  await js(`return browser.storage.local.get(null).then((data) => browser.storage.local.set(
+    Object.fromEntries(Object.keys(data).filter((key) => key.startsWith('icon:')).map((key) => [key, { src: '', at: Date.now() }]))))`)
+  await driver.get(NEWTAB)
+  await until('no icons', () => js("return [...document.querySelectorAll('#sparks .Spark[data-id] .Thumb')].every((thumb) => !thumb.querySelector('img'))"))
+  await js('document.querySelector(\'[data-setting="previews"] [data-value="icon"]\').click()')
+  await until('the icons again', () =>
+    js("return [...document.querySelectorAll('#sparks .Spark[data-id] .Thumb')].every((thumb) => thumb.querySelector('img'))")
+  )
+})
