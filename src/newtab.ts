@@ -2439,7 +2439,7 @@ browserKeyValue.onChanged((keys) => {
 // Previews, taken again: each page opens in a tab of its own, is captured once it has loaded, and
 // the tab closes; FireDial's tab comes back. A page that can't be captured keeps what it had.
 
-const PAGE_WAIT = 15_000 // ms at most for a page to load
+const PAGE_WAIT = 6000 // ms at most for a page to load; then it is captured as it is
 const PAGE_SETTLE = 600 // ms after loading, for late images and fonts
 
 // Once the tab has loaded, after PAGE_WAIT, or on a cancel.
