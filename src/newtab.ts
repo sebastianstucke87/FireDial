@@ -642,8 +642,9 @@ function renderBulk(): void {
   refreshBulk.hidden = !editing || !selection.size
   html('span', refreshBulk).textContent = selection.size > 1 ? 'Refresh previews' : 'Refresh preview'
   const withPreview = store.doc.sparks.filter((spark) => selection.has(spark.id) && spark.thumb).length
-  clearBulk.hidden = !editing || !withPreview
-  html('span', clearBulk).textContent = withPreview > 1 ? 'Clear previews' : 'Clear preview'
+  clearBulk.hidden = !editing || !selection.size
+  clearBulk.disabled = !withPreview
+  html('span', clearBulk).textContent = selection.size > 1 ? 'Clear previews' : 'Clear preview'
   removeButton.hidden = !editing || !selection.size || view?.kind !== 'normal' || Boolean(query)
   html('span', removeButton).textContent = view ? `Remove from ${view.title}` : 'Remove'
 }
@@ -1377,6 +1378,7 @@ interface MenuEntry {
   icon: string
   label: string
   run: () => void
+  disabled?: boolean // there, but nothing to do: menus keep their places
 }
 
 async function copyUrl(spark: Spark): Promise<void> {
@@ -1441,7 +1443,7 @@ function oneSparkMenu(spark: Spark): MenuEntry[] {
     { icon: 'edit', label: 'Edit spark', run: () => void openSparkModal(spark) },
     ...(editing ? [labels, fromThese] : []),
     { icon: 'image', label: 'Refresh preview', run: () => void refreshPreviews([spark]) },
-    ...(spark.thumb ? [{ icon: 'image-off', label: 'Clear preview', run: () => void clearPreviews([spark]) }] : []),
+    { icon: 'image-off', label: 'Clear preview', run: () => void clearPreviews([spark]), disabled: !spark.thumb },
     copy,
     { icon: 'trash', label: 'Delete', run: () => void deleteSpark(spark) }
   ]
@@ -1458,7 +1460,7 @@ function markedMenu(sparks: readonly Spark[]): MenuEntry[] {
     { icon: 'tag', label: 'Labels', run: () => void openLabelModal() },
     ...(first ? [{ icon: 'plus', label: 'Add view', run: () => void newViewFrom(first) }] : []),
     { icon: 'image', label: 'Refresh previews', run: () => void refreshPreviews(sparks) },
-    ...(sparks.some((spark) => spark.thumb) ? [{ icon: 'image-off', label: 'Clear previews', run: () => void clearPreviews(sparks) }] : []),
+    { icon: 'image-off', label: 'Clear previews', run: () => void clearPreviews(sparks), disabled: !sparks.some((spark) => spark.thumb) },
     { icon: 'trash', label: `Delete ${count}`, run: () => void deleteItems(new Set(sparks.map((spark) => spark.id)), new Set()) }
   ]
 }
@@ -1525,8 +1527,9 @@ function menuFor(node: Element): MenuEntry[] | null {
 function openMenu(event: MouseEvent, entries: readonly MenuEntry[]): void {
   event.preventDefault()
   menu.replaceChildren(
-    ...entries.map(({ icon: iconName, label, run }) => {
+    ...entries.map(({ icon: iconName, label, run, disabled = false }) => {
       const entry = el('button', { type: 'button', class: 'ContextMenu__item', role: 'menuitem' }, icon(iconName), label)
+      entry.disabled = disabled
       entry.addEventListener('click', () => {
         closeMenu()
         run()

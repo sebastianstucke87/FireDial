@@ -1030,6 +1030,7 @@ body.editing .Sparks .Spark {
   z-index: 35;
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
   pointer-events: none;
@@ -1527,6 +1528,12 @@ body.editing .Sparks .Spark {
 .ContextMenu__item:focus-visible {
   background: var(--surface-2);
   outline: none;
+}
+
+.ContextMenu__item:disabled {
+  background: none;
+  opacity: 0.45;
+  cursor: default;
 }
 
 .ContextMenu__item .icon {
@@ -2195,10 +2202,11 @@ kbd {
 
 /* Delete and Labels side by side on the left of the bars */
 
-/* narrow: the actions go on more rows rather than squeeze their words */
+/* narrow: the actions go on more rows rather than squeeze their words, Delete stays on the bottom one */
 .BarStart {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 0;
+  flex-wrap: wrap-reverse;
   gap: 8px;
   min-width: 0;
   pointer-events: none;
