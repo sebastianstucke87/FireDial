@@ -1601,7 +1601,7 @@ function renderPreview(): void {
 async function setDraftImage(file: File | undefined): Promise<void> {
   if (!file?.type.startsWith('image/')) return
   if (file.size > LIMITS.imageBytes) {
-    notify(`Not added: images can be up to ${LIMITS.imageBytes / 1024 ** 2} MB`)
+    notify(`Previews can't be over ${LIMITS.imageBytes / 1024 ** 2} MB`)
     return
   }
   draftLink = ''
@@ -1655,7 +1655,7 @@ async function loadDraftLink(): Promise<void> {
     draftSrc = src
     renderPreview()
   } catch (error) {
-    notify(error instanceof LimitError ? `Not loaded: ${error.message.toLowerCase()}` : `Not loaded: ${hostOf(link)} didn't answer`)
+    notify(error instanceof LimitError ? error.message : `Not loaded: ${hostOf(link)} didn't answer`)
   }
 }
 

@@ -8,7 +8,7 @@ export const isStoredImage = (src: string): boolean => /^data:image\/[a-z0-9.+-]
 
 // The image a response carries, read only up to the limit: a larger one stops loading there.
 export async function readImage(response: Response, max: number = LIMITS.imageBytes): Promise<Blob> {
-  const tooLarge = new LimitError(`Images can be up to ${Math.round(max / 1024 ** 2)} MB`)
+  const tooLarge = new LimitError(`Previews can't be over ${Math.round(max / 1024 ** 2)} MB`)
   if (Number(response.headers.get('Content-Length')) > max) {
     await response.body?.cancel().catch(() => undefined)
     throw tooLarge

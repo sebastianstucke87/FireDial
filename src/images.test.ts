@@ -62,7 +62,7 @@ test('an image from a link is read whole, with its type', async () => {
 
 test('an image larger than the limit stops loading there', async () => {
   const { response, pulled } = streamed([4, 4, 4, 4, 4])
-  await assert.rejects(readImage(response, 7), (error) => error instanceof LimitError && error.message === 'Images can be up to 0 MB')
+  await assert.rejects(readImage(response, 7), (error) => error instanceof LimitError && error.message === "Previews can't be over 0 MB")
   assert.ok(pulled() <= 3, `read ${pulled()} parts`)
 })
 
@@ -73,6 +73,6 @@ test('an image that says it is too large is not read at all', async () => {
 })
 
 test('the limit is 20 MB unless told otherwise', async () => {
-  await assert.rejects(readImage(new Response(null, { headers: { 'Content-Length': String(20 * 1024 ** 2 + 1) } })), /up to 20 MB/)
+  await assert.rejects(readImage(new Response(null, { headers: { 'Content-Length': String(20 * 1024 ** 2 + 1) } })), /over 20 MB/)
   assert.equal((await readImage(new Response(new Uint8Array(3)))).size, 3)
 })

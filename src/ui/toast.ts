@@ -55,6 +55,10 @@ export function showToast(text: string, ms: number, background: string, color: s
   host.attachShadow({ mode: 'closed' }).append(toast)
   stack.append(host)
   document.documentElement.append(stack)
+  // In the top layer, above an open modal and its blurred backdrop; shown anew so the newest is on top.
+  stack.popover = 'manual'
+  if (stack.matches(':popover-open')) stack.hidePopover()
+  stack.showPopover()
   while (stack.children.length > 3) stack.firstElementChild?.remove()
   setTimeout(remove, ms)
   toast.addEventListener('click', (event) => {
