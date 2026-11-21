@@ -2,6 +2,7 @@
 
 import * as z from 'zod/mini'
 
+import { isStoredImage } from './images.ts'
 import { LabelText, LimitError, LIMITS, listOf, normalizePrefs, plural, Text, toLabelNames, toSparkUrl, View } from './model.ts'
 import type { Doc, ThumbId } from './model.ts'
 import type { ImportedData, ImportedSpark, ImportedView } from './store.ts'
@@ -64,7 +65,7 @@ export function parseBackup(data: unknown): Parsed {
   const sparks: ImportedSpark[] = []
   for (const { id, title, url: text, thumb, labels } of raw.sparks) {
     const url = toSparkUrl(text)
-    if (url) sparks.push({ key: id, title, url, src: thumb, labels: toLabelNames(labels) })
+    if (url) sparks.push({ key: id, title, url, src: isStoredImage(thumb) ? thumb : '', labels: toLabelNames(labels) }) // only images are kept
   }
   const views: ImportedView[] = []
   for (const item of raw.views) {

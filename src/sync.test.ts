@@ -139,6 +139,20 @@ test('first sync with an empty Drive uploads this browser', async () => {
   assert.deepEqual(state.last, { device: 'Firefox on Windows', at: 1000 })
 })
 
+test('a preview on Drive that is no image is left out', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  await add(a.store, 'a', 'data:image/png;base64,AAAA')
+  await a.sync.start('Firefox on Windows')
+  for (const file of drive.files.values()) if (file.name.startsWith('thumb-')) file.content = 'data:text/html,<p>'
+  const b = await browserWith(drive)
+  await b.sync.start('Chrome on Windows')
+  assert.deepEqual(titles(b.store), ['a'])
+  const thumb = b.store.doc.sparks[0]?.thumb
+  assert.ok(thumb)
+  assert.equal(b.kv.data.get(thumbKey(thumb)), undefined)
+})
+
 test('a browser without sparks takes Drive as it is, images too', async () => {
   const drive = new FakeDrive()
   const a = await browserWith(drive)

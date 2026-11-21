@@ -12,6 +12,7 @@ import * as z from 'zod/mini'
 import type { Drive, DriveFile } from './drive.ts'
 import { OfflineError, SignInError } from './drive.ts'
 import { applySide, diff } from './history.ts'
+import { isStoredImage } from './images.ts'
 import type { Step } from './history.ts'
 import { SparkId, ViewId } from './model.ts'
 import type { Doc, ThumbId } from './model.ts'
@@ -298,7 +299,9 @@ export class Sync {
     const thumbs: Record<ThumbId, string> = {}
     await this.transfer(missing, READS, async (id) => {
       const file = files.get(thumbName(id))
-      if (file) thumbs[id] = await this.drive.read(file) // gone from Drive: the spark goes without
+      if (!file) return // gone from Drive: the spark goes without
+      const src = await this.drive.read(file)
+      if (isStoredImage(src)) thumbs[id] = src // anything but an image: the same
     })
     return this.store.commit(becomes(target), { thumbs, unchecked: true, ifRevision: revision })
   }
