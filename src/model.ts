@@ -164,6 +164,7 @@ export interface Prefs {
   color: Color
   customColor: string // #rrggbb, kept while another color is chosen
   showTitle: boolean
+  showIcons: boolean // sparks show their site's icon, not their preview
   showCounts: boolean
   layout: Layout
   showLabels: boolean // chips on the sparks
@@ -188,6 +189,7 @@ export const DEFAULT_PREFS: Prefs = {
   color: 'firedial',
   customColor: '#3f3f46',
   showTitle: true,
+  showIcons: false,
   showCounts: true,
   layout: 'wide',
   showLabels: true,
@@ -304,6 +306,7 @@ const PrefsSchema = z.object({
     z.transform((text: string) => toHexColor(text) ?? DEFAULT_PREFS.customColor)
   ),
   showTitle: z.catch(z.boolean(), true),
+  showIcons: z.catch(z.boolean(), false),
   showCounts: z.catch(z.boolean(), true),
   layout: z.catch(z.enum(LAYOUTS), DEFAULT_PREFS.layout),
   showLabels: z.catch(z.boolean(), DEFAULT_PREFS.showLabels),

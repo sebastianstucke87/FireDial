@@ -154,6 +154,7 @@ test('the default settings, and the accent of each color', () => {
     color: 'firedial',
     customColor: '#3f3f46',
     showTitle: true,
+    showIcons: false,
     showCounts: true,
     layout: 'wide',
     showLabels: true,

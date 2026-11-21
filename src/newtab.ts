@@ -287,6 +287,7 @@ function render(): Promise<void> {
 
 function settingValue(prefs: Prefs, name: string | undefined): string {
   if (name === 'titles') return prefs.showTitle ? 'on' : 'off'
+  if (name === 'previews') return prefs.showIcons ? 'icon' : 'shot'
   if (name === 'counts') return prefs.showCounts ? 'on' : 'off'
   if (name === 'theme') return prefs.theme
   if (name === 'color') return prefs.color
@@ -477,7 +478,7 @@ async function renderSparks(): Promise<void> {
   const token = ++renderToken
   const sparks = visibleSparks()
   await loadThumbs(sparks)
-  await siteIcons.load(originsOf(sparks.filter((spark) => !spark.thumb)))
+  await siteIcons.load(originsOf(sparks.filter(wantsIcon)))
   if (token !== renderToken) return
   void findIcons(sparks)
   grid.replaceChildren(...sparks.map(sparkTile), ...(query || narrow.matches ? [] : [addTile()]))
@@ -547,7 +548,7 @@ function sparkTile(spark: Spark): HTMLElement {
   return el(
     'a',
     { class: `Spark${selection.has(spark.id) ? ' Spark--selected' : ''}`, href: spark.url, draggable: editing, 'data-id': spark.id },
-    thumbBox(spark, thumbOf(spark) || iconOf(spark), spark.thumb),
+    store.doc.prefs.showIcons ? thumbBox(spark, iconOf(spark), null) : thumbBox(spark, thumbOf(spark) || iconOf(spark), spark.thumb),
     el(
       'div',
       { class: 'Text' },
@@ -1082,6 +1083,7 @@ suggestBox.addEventListener('click', (event) => {
 
 function applySetting(prefs: Prefs, name: string, value: string): void {
   if (name === 'titles') prefs.showTitle = value === 'on'
+  else if (name === 'previews') prefs.showIcons = value === 'icon'
   else if (name === 'counts') prefs.showCounts = value === 'on'
   else if (name === 'theme' && isTheme(value)) prefs.theme = value
   else if (name === 'color' && isColor(value)) prefs.color = value
@@ -2341,8 +2343,11 @@ async function browserIcon(url: string): Promise<string> {
 const siteIcons = new SiteIcons(browserKeyValue)
 const lookingFor = new Set<string>()
 
+// With Previews set to Icon, every spark shows its site's icon.
+const wantsIcon = (spark: Spark): boolean => !spark.thumb || store.doc.prefs.showIcons
+
 function iconOf(spark: Spark): string {
-  const origin = spark.thumb ? null : originOf(spark.url)
+  const origin = wantsIcon(spark) ? originOf(spark.url) : null
   return origin ? siteIcons.get(origin) : ''
 }
 
@@ -2350,7 +2355,7 @@ function iconOf(spark: Spark): string {
 async function findIcons(sparks: readonly Spark[], force = false): Promise<void> {
   const pages = new Map<string, string>() // a page of each site, for the browser's copy
   for (const spark of sparks) {
-    const origin = spark.thumb ? null : originOf(spark.url)
+    const origin = wantsIcon(spark) ? originOf(spark.url) : null
     if (origin && !pages.has(origin)) pages.set(origin, spark.url)
   }
   await siteIcons.load([...pages.keys()])

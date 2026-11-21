@@ -202,7 +202,7 @@ test('the sidebar is called Settings, with an icon and a title per section', asy
   await home()
   await edit()
   const labels = await js<string[]>("return [...document.querySelectorAll('.Options .Setting > label')].map((label) => label.textContent)")
-  assert.deepEqual(labels, ['Counts', 'Titles', 'Layout', 'Columns', 'Spacing', 'Chips', 'All and Unlabeled', 'Colors'])
+  assert.deepEqual(labels, ['Counts', 'Previews', 'Titles', 'Layout', 'Columns', 'Spacing', 'Chips', 'All and Unlabeled', 'Colors'])
   assert.equal(await text('.Options h2'), 'Settings')
   assert.deepEqual(
     await js(
