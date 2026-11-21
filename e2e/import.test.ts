@@ -84,28 +84,33 @@ test('an import asks with numbers, makes labels and views, then loads the icons 
   await driver.findElement(By.css('dialog[open] .Confirm input')).click()
   await driver.findElement(By.css('dialog[open] .Button--primary')).click()
   await until('the views', async () => (await viewNames()).join() === 'All,Unlabeled,Work')
-  await until('the icons', () => js("return browser.storage.local.get('sparks').then(({ sparks }) => sparks.every((spark) => spark.thumb !== null))"))
+  await until('the site icon', () =>
+    js(
+      "return browser.storage.local.get(null).then((data) => Object.entries(data).some(([key, value]) => key.startsWith('icon:') && value.src.startsWith('data:image/')))"
+    )
+  )
+  await until('the icons on the sparks', () =>
+    js("return [...document.querySelectorAll('#sparks .Spark[data-id] .Thumb')].every((thumb) => thumb.querySelector('img'))")
+  )
   assert.deepEqual(await notifications(), ['Imported 3 bookmarks, 1 new view'])
   const sparks = await js<{ title: string; labels: string[]; thumb: boolean }[]>(`
     return browser.storage.local.get('sparks').then(({ sparks }) => sparks.map((spark) => ({ title: spark.title, labels: spark.labels, thumb: spark.thumb !== null })))`)
   assert.deepEqual(sparks, [
-    { title: 'Board', labels: ['Work'], thumb: true },
-    { title: 'Ref', labels: ['Work', 'Docs'], thumb: true },
-    { title: 'Loose', labels: [], thumb: true }
+    { title: 'Board', labels: ['Work'], thumb: false },
+    { title: 'Ref', labels: ['Work', 'Docs'], thumb: false },
+    { title: 'Loose', labels: [], thumb: false }
   ])
   assert.ok(asked.includes('/icon.png'))
   assert.equal(await js('return browser.permissions.contains({ origins: ["<all_urls>"] })'), true, 'the access lasts until the browser closes')
 })
 
-test('a second import adds nothing, and undo takes the icons, then the import back', async () => {
+test('a second import adds nothing, and undo takes the import back: icons are no previews', async () => {
   await js("document.querySelector('#firedial-toasts')?.remove()")
   await startImport()
   await until('the answer', async () => (await driver.findElements(By.css('#firedial-toasts'))).length > 0)
   assert.deepEqual(await notifications(), ['Nothing new to import'])
   assert.deepEqual(await openDialogs(), [], 'no question, and no access asked for')
   await js("document.querySelector('#editToggle').click()")
-  await js("document.querySelector('#undo').click()")
-  await until('no icons', () => js("return browser.storage.local.get('sparks').then(({ sparks }) => sparks.every((spark) => spark.thumb === null))"))
   await js("document.querySelector('#undo').click()")
   await until('only All and Unlabeled', async () => (await viewNames()).join() === 'All,Unlabeled')
 })

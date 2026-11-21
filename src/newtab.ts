@@ -7,6 +7,7 @@ import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
+import { originOfKey, SiteIcons } from './icons.ts'
 import { blobToDataUrl, faviconPath, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
@@ -476,7 +477,9 @@ async function renderSparks(): Promise<void> {
   const token = ++renderToken
   const sparks = visibleSparks()
   await loadThumbs(sparks)
+  await siteIcons.load(originsOf(sparks.filter((spark) => !spark.thumb)))
   if (token !== renderToken) return
+  void findIcons(sparks)
   grid.replaceChildren(...sparks.map(sparkTile), ...(query || narrow.matches ? [] : [addTile()]))
   alignBars()
 }
@@ -544,7 +547,7 @@ function sparkTile(spark: Spark): HTMLElement {
   return el(
     'a',
     { class: `Spark${selection.has(spark.id) ? ' Spark--selected' : ''}`, href: spark.url, draggable: editing, 'data-id': spark.id },
-    thumbBox(spark, thumbOf(spark), spark.thumb),
+    thumbBox(spark, thumbOf(spark) || iconOf(spark), spark.thumb),
     el(
       'div',
       { class: 'Text' },
@@ -596,15 +599,12 @@ async function addSparkFromUrl(text: string): Promise<void> {
     return renderSparks()
   }
   const viewId = active
-  const added: SparkId[] = []
   await change((doc) => {
     const spark = allocSpark(doc, { title: toLabel(titleFromUrl(url)), url, thumb: null })
-    added.push(spark.id)
     const view = doc.views.find((each) => each.id === viewId)
     if (view) addTo([spark], view)
     return undefined
   })
-  await loadSparkIcons(new Set(added))
 }
 
 // Selection and edit mode
@@ -1687,18 +1687,15 @@ async function openSparkModal(spark?: Spark): Promise<void> {
   const thumb = src === srcBefore ? (spark?.thumb ?? null) : newThumb
   if (newThumb) thumbs.set(newThumb, src)
   const labels = [...sparkLabels.values]
-  const saved: SparkId[] = []
   await change(
     (doc) => {
       const target = doc.sparks.find((item) => item.id === spark?.id)
       if (target) Object.assign(target, { title, url, thumb, labels })
-      saved.push((target ?? allocSpark(doc, { title, url, thumb, labels })).id)
+      else allocSpark(doc, { title, url, thumb, labels })
       return undefined
     },
     newThumb ? { thumbs: { [newThumb]: src } } : {}
   )
-  // Without a preview, the site's icon instead, where the browser has it or site access is allowed.
-  if (!thumb) await loadSparkIcons(new Set(saved))
 }
 
 // No usable URL, no save: mark the field instead of a browser tooltip. Registered before the modal's listener.
@@ -2267,7 +2264,10 @@ async function importBookmarks(): Promise<void> {
     return undefined
   })
   if (added.size) notify(`Imported ${plural(added.size, 'bookmark')}${plan.views.length ? `, ${plural(plan.views.length, 'new view')}` : ''}`)
-  await loadSparkIcons(added)
+  await findIcons(
+    store.doc.sparks.filter((spark) => added.has(spark.id)),
+    true
+  )
 }
 
 function originOf(url: string): string | null {
@@ -2320,48 +2320,55 @@ async function browserIcon(url: string): Promise<string> {
   return isStoredImage(icon) && icon !== (await globe) ? icon : ''
 }
 
-// Icons for sparks without a preview: the browser's own first, then from the sites, if allowed.
-async function loadSparkIcons(ids: ReadonlySet<SparkId>): Promise<void> {
-  const wanted = store.doc.sparks.filter((spark) => ids.has(spark.id) && !spark.thumb)
-  const found = new Map<SparkId, string>()
-  for (const spark of wanted) {
-    const icon = await browserIcon(spark.url)
-    if (icon) found.set(spark.id, icon)
-  }
-  const rest = wanted.filter((spark) => !found.has(spark.id))
-  const origins = originsOf(rest)
-  if (origins.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
-    const icons = await loadIcons(origins, iconImage)
-    for (const spark of rest) {
-      const origin = originOf(spark.url)
-      const src = origin ? icons.get(origin) : undefined
-      if (src) found.set(spark.id, src)
-    }
-  }
-  const chosen = new Map<SparkId, ThumbId>()
-  const images: Record<ThumbId, string> = {}
-  for (const [sparkId, src] of found) {
-    const id = newThumbId()
-    chosen.set(sparkId, id)
-    images[id] = src
-    thumbs.set(id, src)
-  }
-  if (chosen.size) {
-    await change(
-      (doc) => {
-        for (const spark of doc.sparks) {
-          const thumb = chosen.get(spark.id)
-          if (thumb && !spark.thumb) spark.thumb = thumb
-        }
-        return undefined
-      },
-      { thumbs: images }
-    )
-  }
+// Sparks without a preview show their site's icon. Known ones show at once; the others are looked
+// for meanwhile (the browser's own copy first, then the site, if allowed) and show once found.
+const siteIcons = new SiteIcons(browserKeyValue)
+const lookingFor = new Set<string>()
+
+function iconOf(spark: Spark): string {
+  const origin = spark.thumb ? null : originOf(spark.url)
+  return origin ? siteIcons.get(origin) : ''
 }
 
+// force: also the sites found without one lately (site access was just allowed, say).
+async function findIcons(sparks: readonly Spark[], force = false): Promise<void> {
+  const pages = new Map<string, string>() // a page of each site, for the browser's copy
+  for (const spark of sparks) {
+    const origin = spark.thumb ? null : originOf(spark.url)
+    if (origin && !pages.has(origin)) pages.set(origin, spark.url)
+  }
+  await siteIcons.load([...pages.keys()])
+  const due = (force ? [...pages.keys()].filter((origin) => !siteIcons.get(origin)) : siteIcons.due([...pages.keys()])).filter(
+    (origin) => !lookingFor.has(origin)
+  )
+  if (!due.length) return
+  for (const origin of due) lookingFor.add(origin)
+  const found = new Map<string, string>()
+  try {
+    for (const origin of due) {
+      const icon = await browserIcon(pages.get(origin) ?? origin)
+      if (icon) found.set(origin, icon)
+    }
+    const rest = due.filter((origin) => !found.has(origin))
+    if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
+      for (const [origin, src] of await loadIcons(rest, iconImage)) found.set(origin, src)
+    }
+    await siteIcons.save(due, found)
+  } finally {
+    for (const origin of due) lookingFor.delete(origin)
+  }
+  if (found.size) await renderSparks()
+}
+
+browserKeyValue.onChanged((keys) => {
+  const origins = [...keys].map(originOfKey).filter((origin) => origin !== null)
+  if (!origins.length) return
+  siteIcons.forget(origins)
+  void renderSparks()
+})
+
 // Previews, taken again: each page opens in a tab of its own, is captured once it has loaded, and
-// the tab closes; FireDial's tab comes back. A page that can't be captured gets its site's icon.
+// the tab closes; FireDial's tab comes back. A page that can't be captured keeps what it had.
 
 const PAGE_WAIT = 15_000 // ms at most for a page to load
 const PAGE_SETTLE = 600 // ms after loading, for late images and fonts
@@ -2420,8 +2427,7 @@ async function capturePage(url: string, cancel: AbortController, note: string | 
         : await browser.tabs.captureTab(tabId, { format: 'jpeg', quality: 85 })
       src = await shrinkImage(shot)
     } catch {
-      const origin = originOf(url)
-      src = origin ? ((await loadIcons([origin], iconImage)).get(origin) ?? '') : ''
+      // the browser doesn't let this page be captured
     }
     const stopped = (): boolean => cancel.signal.aborted // read anew: closing the tab cancels meanwhile
     if (note && IS_CHROME && !stopped()) {
