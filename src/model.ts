@@ -12,6 +12,7 @@ export const LIMITS = {
   url: 4_000,
   label: 400,
   backupBytes: 1024 ** 3,
+  imageBytes: 20 * 1024 ** 2, // an image file or one from a link, before it's scaled down
   labelsPerSpark: 50
 } as const
 

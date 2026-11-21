@@ -10,6 +10,7 @@ const MOST = 20
 const FEWEST = 2
 const STEP = 2
 const SLOWER = 2 // times the steady time that count as climbing
+const PAGE_MAX = 1024 ** 2 // bytes of a home page read for its icons, which its head names
 
 interface IconLink {
   url: string
@@ -111,6 +112,23 @@ export async function runAdaptive<Item>(
   })
 }
 
+// The start of a page's text, up to max bytes: the rest isn't loaded.
+export async function pageStart(response: Response, max: number = PAGE_MAX): Promise<string> {
+  const reader = response.body?.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let size = 0
+  for (let part = await reader?.read(); part && !part.done; part = await reader?.read()) {
+    text += decoder.decode(part.value.subarray(0, max - size), { stream: true })
+    size += part.value.byteLength
+    if (size >= max) {
+      await reader?.cancel().catch(() => undefined)
+      break
+    }
+  }
+  return text + decoder.decode()
+}
+
 // fetch with a time limit, which an abort of the whole run also ends.
 async function fetchWithin(url: string, signal?: AbortSignal, fetcher: typeof fetch = fetch): Promise<Response> {
   const timeout = AbortSignal.timeout(FETCH_TIMEOUT)
@@ -133,7 +151,7 @@ export async function loadIcons(
       let html = ''
       try {
         const response = await fetchWithin(page, options.signal, fetcher)
-        if (response.ok) html = await response.text()
+        if (response.ok) html = await pageStart(response)
       } catch {
         // no page: /favicon.ico may still be there
       }

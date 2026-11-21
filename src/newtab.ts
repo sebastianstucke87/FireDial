@@ -7,7 +7,7 @@ import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
-import { blobToDataUrl, isStoredImage, siteAccess } from './images.ts'
+import { blobToDataUrl, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
   accentOf,
@@ -1600,6 +1600,10 @@ function renderPreview(): void {
 
 async function setDraftImage(file: File | undefined): Promise<void> {
   if (!file?.type.startsWith('image/')) return
+  if (file.size > LIMITS.imageBytes) {
+    notify(`Not added: images can be up to ${LIMITS.imageBytes / 1024 ** 2} MB`)
+    return
+  }
   draftLink = ''
   draftSrc = await shrinkImage(await readFile(file))
   renderPreview()
@@ -1640,7 +1644,7 @@ async function loadDraftLink(): Promise<void> {
   }
   try {
     const response = await fetch(link, { credentials: 'omit' })
-    const blob = response.ok ? await response.blob() : null
+    const blob = response.ok ? await readImage(response) : null
     if (!blob?.type.startsWith('image/')) {
       notify('Not loaded: no image at that address')
       return
@@ -1650,8 +1654,8 @@ async function loadDraftLink(): Promise<void> {
     draftLink = ''
     draftSrc = src
     renderPreview()
-  } catch {
-    notify(`Not loaded: ${hostOf(link)} didn't answer`)
+  } catch (error) {
+    notify(error instanceof LimitError ? `Not loaded: ${error.message.toLowerCase()}` : `Not loaded: ${hostOf(link)} didn't answer`)
   }
 }
 
@@ -2260,7 +2264,7 @@ function originOf(url: string): string | null {
 
 // An answer as a small PNG, if it's an image at all. Through an <img>, which reads ICO and SVG too.
 async function iconImage(response: Response): Promise<string | null> {
-  const blob = await response.blob()
+  const blob = await readImage(response)
   if (!blob.type.startsWith('image/')) return null
   const url = URL.createObjectURL(blob)
   try {
