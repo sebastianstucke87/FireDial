@@ -25,7 +25,7 @@ const file = (views: unknown[], sparks: unknown[]): unknown => ({ format: 'fired
 test('an export imports back, views with their rule, sort and order', () => {
   const doc = sampleDoc()
   doc.views[2]?.order.push(SparkId.parse(0))
-  const parts = exportParts(doc, new Map([[ThumbId.parse('x'), 'data:image']]))
+  const parts = exportParts(doc, new Map([[ThumbId.parse('x'), 'data:image/png;base64,AAAA']]))
   const parsed = parseBackup(JSON.parse(parts.join('')))
   assert.deepEqual(
     parsed.views.map(({ kind, title, sort, rule, order }) => [kind, title, sort, rule.include, order]),
@@ -37,7 +37,7 @@ test('an export imports back, views with their rule, sort and order', () => {
   )
   assert.deepEqual(
     parsed.sparks.map(({ key, title, url, src, labels }) => [key, title, url, src, labels]),
-    [[0, 'a', 'https://a.example/', 'data:image', ['Trip to Rome', 'Work']]]
+    [[0, 'a', 'https://a.example/', 'data:image/png;base64,AAAA', ['Trip to Rome', 'Work']]]
   )
   assert.equal(parsed.skipped, 0)
 })
@@ -122,11 +122,11 @@ test('an export lists every spark, those without a picture with an empty one', (
   const url = toSparkUrl('https://b.example/')
   assert.ok(url)
   doc.sparks.push({ id: SparkId.parse(1), title: toLabel('b'), url, thumb: null, labels: [] })
-  const parsed = parseBackup(JSON.parse(exportParts(doc, new Map([[ThumbId.parse('x'), 'data:image']])).join('')))
+  const parsed = parseBackup(JSON.parse(exportParts(doc, new Map([[ThumbId.parse('x'), 'data:image/png;base64,AAAA']])).join('')))
   assert.deepEqual(
     parsed.sparks.map(({ title, src }) => [title, src]),
     [
-      ['a', 'data:image'],
+      ['a', 'data:image/png;base64,AAAA'],
       ['b', '']
     ]
   )
@@ -153,4 +153,19 @@ test('an export has no version number: an import goes by what is in the file', (
   const exported: unknown = JSON.parse(exportParts(sampleDoc(), new Map()).join(''))
   assert.ok(exported !== null && typeof exported === 'object' && !('version' in exported))
   assert.equal(parseBackup({ format: 'firedial', version: 99, views: [], sparks: [{ title: 'a', url: 'https://a.example/' }] }).sparks.length, 1)
+})
+
+test('an imported preview that is no image is left out', () => {
+  const file = {
+    format: 'firedial',
+    views: [],
+    sparks: [
+      { id: 0, title: 'a', url: 'https://a.example/', thumb: 'data:text/html,<p>' },
+      { id: 1, title: 'b', url: 'https://b.example/', thumb: 'https://b.example/b.png' }
+    ]
+  }
+  assert.deepEqual(
+    parseBackup(file).sparks.map((spark) => spark.src),
+    ['', '']
+  )
 })

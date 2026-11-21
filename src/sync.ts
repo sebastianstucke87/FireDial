@@ -9,11 +9,13 @@
 
 import * as z from 'zod/mini'
 
+import { backupName, exportParts } from './backup.ts'
 import type { Drive, DriveFile } from './drive.ts'
 import { OfflineError, SignInError } from './drive.ts'
 import { applySide, diff } from './history.ts'
+import { isStoredImage } from './images.ts'
 import type { Step } from './history.ts'
-import { SparkId, ViewId } from './model.ts'
+import { LimitError, LIMITS, SparkId, ViewId } from './model.ts'
 import type { Doc, ThumbId } from './model.ts'
 import { docItems, parseDoc } from './store.ts'
 import type { KeyValue, Store } from './store.ts'
@@ -52,7 +54,7 @@ const SyncStateSchema = z.object({
   version: z.catch(z.number(), 0), // the version on Drive the base came from
   last: z.catch(z.nullable(Stamp), null), // the last change on Drive: which browser, when
   lastPull: z.catch(z.number(), 0),
-  problem: z.catch(z.string(), ''), // why it's offline, for the console and bug reports
+  problem: z.catch(z.string(), ''), // why it's offline, for the console and bug reports; when off, why sync stopped itself
   // First sync with sparks on both sides: which to keep is up to the user.
   choice: z.catch(z.nullable(z.object({ ...Stamp.shape, sparks: z.catch(z.number(), 0), local: z.catch(z.number(), 0) })), null)
 })
@@ -137,18 +139,29 @@ const becomes =
     return undefined
   }
 
+// Saves a backup file where the user finds it: the FireDial folder in their Drive.
+export type Keep = (name: string, content: Blob) => Promise<void>
+
+const backupBlob = (doc: Doc, images: ReadonlyMap<ThumbId, string>): Blob => {
+  const blob = new Blob(exportParts(doc, images), { type: 'application/json' })
+  if (blob.size > LIMITS.backupBytes) throw new LimitError('The backup would be larger than 1 GB')
+  return blob
+}
+
 export class Sync {
   private readonly store: Store
   private readonly kv: KeyValue
   private readonly drive: Drive
   private readonly now: () => number
+  private readonly keep: Keep
   private queue: Promise<unknown> = Promise.resolve()
 
-  constructor(store: Store, kv: KeyValue, drive: Drive, now: () => number = Date.now) {
+  constructor(store: Store, kv: KeyValue, drive: Drive, now: () => number = Date.now, keep: Keep = () => Promise.resolve()) {
     this.store = store
     this.kv = kv
     this.drive = drive
     this.now = now
+    this.keep = keep
   }
 
   async state(): Promise<SyncState> {
@@ -207,12 +220,42 @@ export class Sync {
       const state = await this.state()
       if (state.status !== 'choose') return
       await this.update({ status: 'syncing', choice: null })
-      const remote = await this.fetchRemote(await this.drive.list())
+      const files = await this.drive.list()
+      const remote = await this.fetchRemote(files)
+      // The side that gets replaced is kept as a backup first; without one, nothing is replaced.
+      try {
+        const replaced = from === 'drive' ? await this.localBackup() : remote && (await this.remoteBackup(remote, files))
+        if (replaced) await this.keep(backupName(new Date(this.now()), true), replaced)
+      } catch (error) {
+        console.warn('FireDial sync: no backup, so not started', error)
+        await this.kv.remove('syncBase')
+        await this.kv.set({ sync: { ...parseSyncState({}), problem: 'Sync not started: the backup failed' } })
+        return
+      }
       if (from === 'drive' && remote) return this.take(remote)
       // This browser's doc goes over Drive's: no base, and Drive's version as the one known.
       await this.update({ version: remote?.version ?? 0 })
       return this.cycle(true)
     })
+  }
+
+  private async localBackup(): Promise<Blob> {
+    await this.store.load()
+    const doc = this.store.doc
+    return backupBlob(doc, await this.store.thumbs([...thumbsOf(doc)]))
+  }
+
+  // Drive's doc with its previews, as a backup file.
+  private async remoteBackup(remote: Remote, files: readonly DriveFile[]): Promise<Blob> {
+    const { doc } = remote
+    const byName = new Map(files.map((file) => [file.name, file.id]))
+    const images = new Map<ThumbId, string>()
+    await inParallel([...thumbsOf(doc)], READS, async (id) => {
+      const file = byName.get(thumbName(id))
+      const src = file ? await this.drive.read(file) : ''
+      if (isStoredImage(src)) images.set(id, src)
+    })
+    return backupBlob(doc, images)
   }
 
   // Sends changes made here; with pull, also checks Drive for newer ones.
@@ -298,7 +341,9 @@ export class Sync {
     const thumbs: Record<ThumbId, string> = {}
     await this.transfer(missing, READS, async (id) => {
       const file = files.get(thumbName(id))
-      if (file) thumbs[id] = await this.drive.read(file) // gone from Drive: the spark goes without
+      if (!file) return // gone from Drive: the spark goes without
+      const src = await this.drive.read(file)
+      if (isStoredImage(src)) thumbs[id] = src // anything but an image: the same
     })
     return this.store.commit(becomes(target), { thumbs, unchecked: true, ifRevision: revision })
   }

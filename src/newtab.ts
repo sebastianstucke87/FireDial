@@ -7,7 +7,8 @@ import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
-import { blobToDataUrl, isStoredImage, siteAccess } from './images.ts'
+import { originOfKey, SiteIcons } from './icons.ts'
+import { blobToDataUrl, faviconPath, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
   accentOf,
@@ -38,8 +39,9 @@ import {
   MIN_COLUMNS,
   MIN_GROUP_WIDTH,
   moveInView,
-  moveView,
+  moveViews,
   newThumbId,
+  isBlocked,
   nextViewName,
   normalizeUrl,
   plural,
@@ -68,7 +70,7 @@ import { Dropdown } from './ui/dropdown.ts'
 import type { Choice } from './ui/dropdown.ts'
 import { editable } from './ui/editable.ts'
 import { Modal } from './ui/modal.ts'
-import { acrossBrowsers, initSync, saveToDrive } from './ui/sync.ts'
+import { acrossBrowsers, initSync, isSyncing, saveToDrive } from './ui/sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 
 const THUMB_MAX_WIDTH = 640
@@ -195,9 +197,6 @@ const notify = (text: string): void => {
 
 // Opening sparks
 
-// Browsers don't let extensions open file:, about: and chrome: URLs, so those sparks copy their URL.
-const isBlocked = (url: string): boolean => /^(file|about|chrome):/i.test(url)
-
 async function copyBlocked(url: string): Promise<void> {
   await navigator.clipboard.writeText(url)
   notify('URL copied: paste it in the address bar')
@@ -288,6 +287,7 @@ function render(): Promise<void> {
 
 function settingValue(prefs: Prefs, name: string | undefined): string {
   if (name === 'titles') return prefs.showTitle ? 'on' : 'off'
+  if (name === 'previews') return prefs.showIcons ? 'icon' : 'shot'
   if (name === 'counts') return prefs.showCounts ? 'on' : 'off'
   if (name === 'theme') return prefs.theme
   if (name === 'color') return prefs.color
@@ -478,7 +478,9 @@ async function renderSparks(): Promise<void> {
   const token = ++renderToken
   const sparks = visibleSparks()
   await loadThumbs(sparks)
+  await siteIcons.load(originsOf(sparks.filter(wantsIcon)))
   if (token !== renderToken) return
+  void findIcons(sparks)
   grid.replaceChildren(...sparks.map(sparkTile), ...(query || narrow.matches ? [] : [addTile()]))
   alignBars()
 }
@@ -546,7 +548,7 @@ function sparkTile(spark: Spark): HTMLElement {
   return el(
     'a',
     { class: `Spark${selection.has(spark.id) ? ' Spark--selected' : ''}`, href: spark.url, draggable: editing, 'data-id': spark.id },
-    thumbBox(spark, thumbOf(spark), spark.thumb),
+    store.doc.prefs.showIcons ? thumbBox(spark, iconOf(spark), null) : thumbBox(spark, thumbOf(spark) || iconOf(spark), spark.thumb),
     el(
       'div',
       { class: 'Text' },
@@ -572,7 +574,7 @@ function addTile(): HTMLElement {
 function openAddTile(tile: HTMLElement): void {
   if (tile.classList.contains('AddSpark--editing')) return
   tile.classList.add('AddSpark--editing')
-  const input = el('input', { placeholder: 'Paste URL', autocomplete: 'off', spellcheck: false, maxlength: LIMITS.url, 'aria-label': 'URL' })
+  const input = el('input', { placeholder: 'Add URL', autocomplete: 'off', spellcheck: false, maxlength: LIMITS.url, 'aria-label': 'URL' })
   html('.Plus', tile).replaceWith(input)
   // Later, not at once: a click may be on its way to what's under the mouse.
   const close = (): void => {
@@ -591,14 +593,14 @@ function openAddTile(tile: HTMLElement): void {
   input.focus()
 }
 
-function addSparkFromUrl(text: string): Promise<void> {
+async function addSparkFromUrl(text: string): Promise<void> {
   const url = toSparkUrl(normalizeUrl(text))
   if (!url) {
     notify('Not added: the URL is too long')
     return renderSparks()
   }
   const viewId = active
-  return change((doc) => {
+  await change((doc) => {
     const spark = allocSpark(doc, { title: toLabel(titleFromUrl(url)), url, thumb: null })
     const view = doc.views.find((each) => each.id === viewId)
     if (view) addTo([spark], view)
@@ -639,6 +641,10 @@ function renderBulk(): void {
   labelBulk.hidden = !editing || !selection.size
   refreshBulk.hidden = !editing || !selection.size
   html('span', refreshBulk).textContent = selection.size > 1 ? 'Refresh previews' : 'Refresh preview'
+  const withPreview = store.doc.sparks.filter((spark) => selection.has(spark.id) && spark.thumb).length
+  clearBulk.hidden = !editing || !selection.size
+  clearBulk.disabled = !withPreview
+  html('span', clearBulk).textContent = selection.size > 1 ? 'Clear previews' : 'Clear preview'
   removeButton.hidden = !editing || !selection.size || view?.kind !== 'normal' || Boolean(query)
   html('span', removeButton).textContent = view ? `Remove from ${view.title}` : 'Remove'
 }
@@ -763,6 +769,15 @@ async function removeFromActive(ids: ReadonlySet<SparkId>): Promise<void> {
 }
 
 // Puts the sparks before or after the target spark in the open view's order; without a target, at its end.
+// The previews go, as one step to undo: the sparks show their site's icon instead.
+function clearPreviews(sparks: readonly Spark[]): Promise<void> {
+  const ids = new Set(sparks.map((spark) => spark.id))
+  return change((doc) => {
+    for (const spark of doc.sparks) if (ids.has(spark.id)) spark.thumb = null
+    return undefined
+  })
+}
+
 function reorderSparks(ids: ReadonlySet<SparkId>, targetId: SparkId | null, after: boolean): Promise<void> {
   const viewId = active
   return change((doc) => {
@@ -790,9 +805,11 @@ function renameViewTo(id: ViewId, text: string): Promise<void> {
   })
 }
 
+// A marked view takes the other marked ones along.
 function reorderView(id: ViewId, targetId: ViewId, after: boolean): Promise<void> {
+  const ids = markedViews.has(id) ? [...markedViews] : [id]
   return change((doc) => {
-    moveView(doc, id, targetId, after)
+    moveViews(doc, ids, targetId, after)
     return undefined
   })
 }
@@ -832,7 +849,7 @@ const viewSort = new Dropdown<Sort>(html('#viewSort'), 'Sort', setSort)
 function startNewGroup(): void {
   const button = html('#newGroup')
   if (!button.isConnected) return
-  const input = el('input', { class: 'NewGroupInput', placeholder: 'Name view', maxlength: LIMITS.label, 'aria-label': 'Name view' })
+  const input = el('input', { class: 'NewGroupInput', placeholder: 'Add name', maxlength: LIMITS.label, 'aria-label': 'View name' })
   button.replaceWith(input)
   input.focus()
   editable(
@@ -1067,6 +1084,7 @@ suggestBox.addEventListener('click', (event) => {
 
 function applySetting(prefs: Prefs, name: string, value: string): void {
   if (name === 'titles') prefs.showTitle = value === 'on'
+  else if (name === 'previews') prefs.showIcons = value === 'icon'
   else if (name === 'counts') prefs.showCounts = value === 'on'
   else if (name === 'theme' && isTheme(value)) prefs.theme = value
   else if (name === 'color' && isColor(value)) prefs.color = value
@@ -1283,7 +1301,7 @@ async function importFile(file: File): Promise<string> {
   if (file.size > LIMITS.backupBytes) throw new LimitError('The file is larger than 1 GB')
   showImport('Reading the file')
   const backup = readBackup(await file.text())
-  showImport('Saving a backup before import')
+  showImport(isSyncing() ? 'Saving a remote backup before import' : 'Saving a backup before import')
   await autoBackup('imported')
   let done = 0
   const sparks = []
@@ -1336,8 +1354,8 @@ async function runImport(file: File): Promise<void> {
   } catch (error) {
     endImport('Import failed', errorText(error), 'Close')
   }
+  await afterChange() // behind the result, so it's there to see before Done
   await closed
-  await afterChange()
 }
 
 const importInput = $('#importFile', HTMLInputElement)
@@ -1360,6 +1378,7 @@ interface MenuEntry {
   icon: string
   label: string
   run: () => void
+  disabled?: boolean // there, but nothing to do: menus keep their places
 }
 
 async function copyUrl(spark: Spark): Promise<void> {
@@ -1424,6 +1443,7 @@ function oneSparkMenu(spark: Spark): MenuEntry[] {
     { icon: 'edit', label: 'Edit spark', run: () => void openSparkModal(spark) },
     ...(editing ? [labels, fromThese] : []),
     { icon: 'image', label: 'Refresh preview', run: () => void refreshPreviews([spark]) },
+    { icon: 'image-off', label: 'Clear preview', run: () => void clearPreviews([spark]), disabled: !spark.thumb },
     copy,
     { icon: 'trash', label: 'Delete', run: () => void deleteSpark(spark) }
   ]
@@ -1440,6 +1460,7 @@ function markedMenu(sparks: readonly Spark[]): MenuEntry[] {
     { icon: 'tag', label: 'Labels', run: () => void openLabelModal() },
     ...(first ? [{ icon: 'plus', label: 'Add view', run: () => void newViewFrom(first) }] : []),
     { icon: 'image', label: 'Refresh previews', run: () => void refreshPreviews(sparks) },
+    { icon: 'image-off', label: 'Clear previews', run: () => void clearPreviews(sparks), disabled: !sparks.some((spark) => spark.thumb) },
     { icon: 'trash', label: `Delete ${count}`, run: () => void deleteItems(new Set(sparks.map((spark) => spark.id)), new Set()) }
   ]
 }
@@ -1506,8 +1527,9 @@ function menuFor(node: Element): MenuEntry[] | null {
 function openMenu(event: MouseEvent, entries: readonly MenuEntry[]): void {
   event.preventDefault()
   menu.replaceChildren(
-    ...entries.map(({ icon: iconName, label, run }) => {
+    ...entries.map(({ icon: iconName, label, run, disabled = false }) => {
       const entry = el('button', { type: 'button', class: 'ContextMenu__item', role: 'menuitem' }, icon(iconName), label)
+      entry.disabled = disabled
       entry.addEventListener('click', () => {
         closeMenu()
         run()
@@ -1597,11 +1619,14 @@ function renderPreview(): void {
   refreshThumb.disabled = capturing || !originOf(normalizeUrl(preview.url))
   refreshTitleClear()
   refreshUrlClear()
-  titleField.placeholder = hostOf(preview.url) || 'Title'
 }
 
 async function setDraftImage(file: File | undefined): Promise<void> {
   if (!file?.type.startsWith('image/')) return
+  if (file.size > LIMITS.imageBytes) {
+    notify(`Previews can't be over ${LIMITS.imageBytes / 1024 ** 2} MB`)
+    return
+  }
   draftLink = ''
   draftSrc = await shrinkImage(await readFile(file))
   renderPreview()
@@ -1642,7 +1667,7 @@ async function loadDraftLink(): Promise<void> {
   }
   try {
     const response = await fetch(link, { credentials: 'omit' })
-    const blob = response.ok ? await response.blob() : null
+    const blob = response.ok ? await readImage(response) : null
     if (!blob?.type.startsWith('image/')) {
       notify('Not loaded: no image at that address')
       return
@@ -1652,8 +1677,8 @@ async function loadDraftLink(): Promise<void> {
     draftLink = ''
     draftSrc = src
     renderPreview()
-  } catch {
-    notify(`Not loaded: ${hostOf(link)} didn't answer`)
+  } catch (error) {
+    notify(error instanceof LimitError ? error.message : `Not loaded: ${hostOf(link)} didn't answer`)
   }
 }
 
@@ -1846,13 +1871,15 @@ groupsNav.addEventListener('dragstart', (event) => {
   }
   requestAnimationFrame(() => {
     viewEl.classList.add('Group--dragging')
+    if (markedViews.has(id)) for (const row of $$('.Group--marked', Element)) row.classList.add('Group--dragging')
   })
 })
 
 groupsNav.addEventListener('dragover', (event) => {
   const over = closest(event, '.Group')
   if (!drag || !over) return
-  if (drag.type === 'view' && viewIdOf(over) === drag.id) return
+  const overId = viewIdOf(over)
+  if (drag.type === 'view' && (overId === drag.id || (overId !== null && markedViews.has(drag.id) && markedViews.has(overId)))) return
   event.preventDefault()
   clearDropMarks()
   if (drag.type === 'spark') over.classList.add('Group--drop')
@@ -1897,6 +1924,7 @@ document.addEventListener('dragend', endDrag)
 const labelBulk = $('#labelBulk', HTMLButtonElement)
 const removeButton = $('#removeFromView', HTMLButtonElement)
 const refreshBulk = $('#refreshBulk', HTMLButtonElement)
+const clearBulk = $('#clearBulk', HTMLButtonElement)
 const trash = html('#trash')
 
 async function throwAway(dragged: Drag): Promise<void> {
@@ -1952,6 +1980,14 @@ function startBand(event: PointerEvent): void {
 main.addEventListener('pointerdown', (event) => {
   if (!editing || event.button !== 0 || closest(event, '.Spark')) return
   if (event.target === main && event.offsetX >= main.clientWidth) return // scrollbar
+  event.preventDefault()
+  startBand(event)
+  if (!event.shiftKey) clearSelection()
+})
+
+// Above the sparks too: the space around the search and the sort, not their controls.
+html('.Top').addEventListener('pointerdown', (event) => {
+  if (!editing || event.button !== 0 || closest(event, 'input, button, label, a, [role], .Suggest')) return
   event.preventDefault()
   startBand(event)
   if (!event.shiftKey) clearSelection()
@@ -2025,6 +2061,7 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
     refreshing?.abort()
   },
   'refresh-bulk': () => void refreshPreviews(store.doc.sparks.filter((spark) => selection.has(spark.id))),
+  'clear-bulk': () => void clearPreviews(store.doc.sparks.filter((spark) => selection.has(spark.id))),
   'import-bookmarks': () => void importBookmarks(),
   export: () => void exportData(),
   import: () => void askImport(),
@@ -2248,7 +2285,10 @@ async function importBookmarks(): Promise<void> {
     return undefined
   })
   if (added.size) notify(`Imported ${plural(added.size, 'bookmark')}${plan.views.length ? `, ${plural(plan.views.length, 'new view')}` : ''}`)
-  await loadSparkIcons(added)
+  await findIcons(
+    store.doc.sparks.filter((spark) => added.has(spark.id)),
+    true
+  )
 }
 
 function originOf(url: string): string | null {
@@ -2262,7 +2302,7 @@ function originOf(url: string): string | null {
 
 // An answer as a small PNG, if it's an image at all. Through an <img>, which reads ICO and SVG too.
 async function iconImage(response: Response): Promise<string | null> {
-  const blob = await response.blob()
+  const blob = await readImage(response)
   if (!blob.type.startsWith('image/')) return null
   const url = URL.createObjectURL(blob)
   try {
@@ -2283,38 +2323,76 @@ async function iconImage(response: Response): Promise<string | null> {
 
 const originsOf = (sparks: readonly Spark[]): string[] => [...new Set(sparks.map((spark) => originOf(spark.url)).filter((origin) => origin !== null))]
 
-async function loadSparkIcons(ids: ReadonlySet<SparkId>): Promise<void> {
-  const wanted = store.doc.sparks.filter((spark) => ids.has(spark.id) && !spark.thumb)
-  const origins = originsOf(wanted)
-  if (!origins.length) return
-  const icons = await loadIcons(origins, iconImage)
-  const chosen = new Map<SparkId, ThumbId>()
-  const images: Record<ThumbId, string> = {}
-  for (const spark of wanted) {
-    const origin = originOf(spark.url)
-    const src = origin ? icons.get(origin) : undefined
-    if (!src) continue
-    const id = newThumbId()
-    chosen.set(spark.id, id)
-    images[id] = src
-    thumbs.set(id, src)
+// Chrome keeps the icons of sites it has been to, which need no site access. For any other site
+// it gives its own globe, which isn't the site's icon.
+let globe: Promise<string> | null = null
+async function browserIcon(url: string): Promise<string> {
+  if (!IS_CHROME) return ''
+  const read = async (page: string): Promise<string> => {
+    try {
+      const response = await fetch(browser.runtime.getURL(faviconPath(page, 64)))
+      return response.ok ? await blobToDataUrl(await response.blob()) : ''
+    } catch {
+      return ''
+    }
   }
-  if (chosen.size) {
-    await change(
-      (doc) => {
-        for (const spark of doc.sparks) {
-          const thumb = chosen.get(spark.id)
-          if (thumb && !spark.thumb) spark.thumb = thumb
-        }
-        return undefined
-      },
-      { thumbs: images }
-    )
-  }
+  globe ??= read('https://example.invalid/')
+  const icon = await read(url)
+  return isStoredImage(icon) && icon !== (await globe) ? icon : ''
 }
 
+// Sparks without a preview show their site's icon. Known ones show at once; the others are looked
+// for meanwhile (the browser's own copy first, then the site, if allowed) and show once found.
+const siteIcons = new SiteIcons(browserKeyValue)
+const lookingFor = new Set<string>()
+
+// With Previews set to Icon, every spark shows its site's icon.
+const wantsIcon = (spark: Spark): boolean => !spark.thumb || store.doc.prefs.showIcons
+
+function iconOf(spark: Spark): string {
+  const origin = wantsIcon(spark) ? originOf(spark.url) : null
+  return origin ? siteIcons.get(origin) : ''
+}
+
+// force: also the sites found without one lately (site access was just allowed, say).
+async function findIcons(sparks: readonly Spark[], force = false): Promise<void> {
+  const pages = new Map<string, string>() // a page of each site, for the browser's copy
+  for (const spark of sparks) {
+    const origin = wantsIcon(spark) ? originOf(spark.url) : null
+    if (origin && !pages.has(origin)) pages.set(origin, spark.url)
+  }
+  await siteIcons.load([...pages.keys()])
+  const due = (force ? [...pages.keys()].filter((origin) => !siteIcons.get(origin)) : siteIcons.due([...pages.keys()])).filter(
+    (origin) => !lookingFor.has(origin)
+  )
+  if (!due.length) return
+  for (const origin of due) lookingFor.add(origin)
+  const found = new Map<string, string>()
+  try {
+    for (const origin of due) {
+      const icon = await browserIcon(pages.get(origin) ?? origin)
+      if (icon) found.set(origin, icon)
+    }
+    const rest = due.filter((origin) => !found.has(origin))
+    if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
+      for (const [origin, src] of await loadIcons(rest, iconImage)) found.set(origin, src)
+    }
+    await siteIcons.save(due, found)
+  } finally {
+    for (const origin of due) lookingFor.delete(origin)
+  }
+  if (found.size) await renderSparks()
+}
+
+browserKeyValue.onChanged((keys) => {
+  const origins = [...keys].map(originOfKey).filter((origin) => origin !== null)
+  if (!origins.length) return
+  siteIcons.forget(origins)
+  void renderSparks()
+})
+
 // Previews, taken again: each page opens in a tab of its own, is captured once it has loaded, and
-// the tab closes; FireDial's tab comes back. A page that can't be captured gets its site's icon.
+// the tab closes; FireDial's tab comes back. A page that can't be captured keeps what it had.
 
 const PAGE_WAIT = 15_000 // ms at most for a page to load
 const PAGE_SETTLE = 600 // ms after loading, for late images and fonts
@@ -2373,8 +2451,7 @@ async function capturePage(url: string, cancel: AbortController, note: string | 
         : await browser.tabs.captureTab(tabId, { format: 'jpeg', quality: 85 })
       src = await shrinkImage(shot)
     } catch {
-      const origin = originOf(url)
-      src = origin ? ((await loadIcons([origin], iconImage)).get(origin) ?? '') : ''
+      // the browser doesn't let this page be captured
     }
     const stopped = (): boolean => cancel.signal.aborted // read anew: closing the tab cancels meanwhile
     if (note && IS_CHROME && !stopped()) {
@@ -2703,10 +2780,15 @@ async function init(): Promise<void> {
   if (revealing !== null) revealSpark(revealing)
   store.watch(() => void followStore())
   void loadEngines()
-  initSync(confirm, askFromAbout, {
-    open: (title, detail) => void openWork(title, detail),
-    close: () => importModal.close()
-  })
+  initSync(
+    confirm,
+    askFromAbout,
+    {
+      open: (title, detail) => void openWork(title, detail),
+      close: () => importModal.close()
+    },
+    notify
+  )
 }
 
 void init()

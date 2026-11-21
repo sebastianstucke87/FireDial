@@ -98,6 +98,7 @@ function readData(prefix: string, nodes: readonly TreeNode[]): unknown {
     const [, index, count, chunk] = match
     if (total && total !== Number(count)) return undefined
     total = Number(count)
+    if (Number(index) < 1 || Number(index) > total) return undefined // a part that can't belong
     parts.set(Number(index), chunk ?? '')
   }
   if (!total || parts.size !== total) return undefined

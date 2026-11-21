@@ -34,6 +34,7 @@
     <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="12" x2="14" y2="12"/></symbol>
     <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+    <symbol id="i-image-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A2 2 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></symbol>
     <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor"/></symbol>
     <symbol id="i-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
@@ -71,6 +72,7 @@
           <button type="button" class="Trash Skeleton" id="trash" data-action="trash" hidden><svg class="icon"><use href="#i-trash"/></svg><span>Delete</span></button>
           <button type="button" class="Button LabelBulk" id="labelBulk" data-action="label-bulk" hidden><svg class="icon"><use href="#i-tag"/></svg><span>Labels</span></button>
           <button type="button" class="Button LabelBulk" id="refreshBulk" data-action="refresh-bulk" hidden><svg class="icon"><use href="#i-image"/></svg><span>Refresh preview</span></button>
+          <button type="button" class="Button LabelBulk" id="clearBulk" data-action="clear-bulk" hidden><svg class="icon"><use href="#i-image-off"/></svg><span>Clear preview</span></button>
           <button type="button" class="Button LabelBulk" id="removeFromView" data-action="remove-from-view" hidden><svg class="icon"><use href="#i-x"/></svg><span>Remove</span></button>
         </div>
         <div class="Segmented History" id="history" hidden>
@@ -118,6 +120,10 @@
         </section>
         <section class="Section">
           <h3 class="Section__head"><svg class="icon"><use href="#i-grid"/></svg>Sparks</h3>
+          <div class="Setting">
+            <label>Previews</label>
+            <div class="Segmented" data-setting="previews"><button type="button" data-value="shot">Screenshot</button><button type="button" data-value="icon">Icon</button></div>
+          </div>
           <div class="Setting">
             <label>Titles</label>
             <div class="Segmented" data-setting="titles"><button type="button" data-value="on">Show</button><button type="button" data-value="off">Hide</button></div>
@@ -206,8 +212,8 @@
         <section class="Section">
           <h3 class="Section__head"><svg class="icon"><use href="#i-grid"/></svg>Spark</h3>
           <div class="Setting">
-            <label class="Field"><span class="Input"><input type="text" name="title" aria-label="Title" autocomplete="off" maxlength="400"></span></label>
-            <label class="Field"><span class="Input"><input type="text" name="url" aria-label="URL" placeholder="URL" autocomplete="off" spellcheck="false" maxlength="4000"></span></label>
+            <label class="Field"><span class="Modal__note Field__label">Name</span><span class="Input"><input type="text" name="title" placeholder="Add name" autocomplete="off" maxlength="400"></span></label>
+            <label class="Field"><span class="Modal__note Field__label">URL</span><span class="Input"><input type="text" name="url" placeholder="Add URL" autocomplete="off" spellcheck="false" maxlength="4000"></span></label>
           </div>
         </section>
         <section class="Section">

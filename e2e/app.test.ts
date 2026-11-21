@@ -15,6 +15,7 @@ import * as z from 'zod/mini'
 import { installFireDial, NEWTAB, startFirefox, until as untilIn } from './firefox.ts'
 
 const OCEAN = 'rgb(29, 78, 216)'
+const TEAL = 'rgb(15, 118, 110)'
 
 const server = createServer((request, response) => {
   response.setHeader('content-type', 'text/html')
@@ -201,7 +202,7 @@ test('the sidebar is called Settings, with an icon and a title per section', asy
   await home()
   await edit()
   const labels = await js<string[]>("return [...document.querySelectorAll('.Options .Setting > label')].map((label) => label.textContent)")
-  assert.deepEqual(labels, ['Counts', 'Titles', 'Layout', 'Columns', 'Spacing', 'Chips', 'All and Unlabeled', 'Colors'])
+  assert.deepEqual(labels, ['Counts', 'Previews', 'Titles', 'Layout', 'Columns', 'Spacing', 'Chips', 'All and Unlabeled', 'Colors'])
   assert.equal(await text('.Options h2'), 'Settings')
   assert.deepEqual(
     await js(
@@ -315,7 +316,7 @@ test('the spark modal has sections like the sidebar, and says Add for a new spar
     await js(
       "return [...document.querySelectorAll('#sparkModal .Field')].map((field) => [field.textContent, field.querySelector('input').placeholder].join())"
     ),
-    [',Title', ',URL']
+    ['Name,Add name', 'URL,Add URL']
   )
   assert.equal(await text('[data-action="clear-thumb"]'), 'Clear')
   const edges = await js<string[]>(`
@@ -504,7 +505,7 @@ test('Esc takes back what was typed in place', async () => {
   await until('the plus again', () => js("return document.querySelector('.AddSpark input') === null"))
   assert.equal(await sparkCount(), 2)
   await click('#newGroup')
-  assert.equal(await js("return document.querySelector('.NewGroupInput').placeholder"), 'Name view')
+  assert.equal(await js("return document.querySelector('.NewGroupInput').placeholder"), 'Add name')
   await press('Nothing', Key.ESCAPE)
   await until('the button again', () => js("return document.querySelector('#newGroup') !== null"))
   assert.equal(await js("return document.querySelectorAll('.Group').length"), 2)
@@ -666,7 +667,7 @@ test('Import asks first, then opens the file picker with the click still countin
   assert.equal(await js('return window.pickerAllowed'), true)
 })
 
-test('Import saves a backup first, stays in the selected color, sums up and leaves nothing to undo', async () => {
+test('Import saves a backup first, sums up over the result already shown, and leaves nothing to undo', async () => {
   await home()
   await edit()
   await click('[data-setting="color"] [data-value="ocean"]')
@@ -694,10 +695,9 @@ test('Import saves a backup first, stays in the selected color, sums up and leav
   const colors = await js<string[]>(`
     const modal = document.querySelector('#importModal')
     return [getComputedStyle(modal.querySelector('.Modal__title .icon')).color, getComputedStyle(modal.querySelector('#importDone')).borderTopColor]`)
-  assert.deepEqual(colors, [OCEAN, OCEAN])
+  assert.deepEqual(colors, [TEAL, TEAL], 'the imported color, behind the result too')
+  assert.equal(await sparkCount(), 3, 'the sparks before Done')
   await click('#importDone')
-  await until('the imported color', () => js("return document.documentElement.dataset.color === 'teal'"))
-  await until('the sparks', async () => (await sparkCount()) === 3)
   assert.equal(await canUndo(), false)
   await js("document.querySelectorAll('.Group')[3].click()")
   await until(

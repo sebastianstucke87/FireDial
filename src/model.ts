@@ -12,6 +12,7 @@ export const LIMITS = {
   url: 4_000,
   label: 400,
   backupBytes: 1024 ** 3,
+  imageBytes: 20 * 1024 ** 2, // an image file or one from a link, before it's scaled down
   labelsPerSpark: 50
 } as const
 
@@ -163,6 +164,7 @@ export interface Prefs {
   color: Color
   customColor: string // #rrggbb, kept while another color is chosen
   showTitle: boolean
+  showIcons: boolean // sparks show their site's icon, not their preview
   showCounts: boolean
   layout: Layout
   showLabels: boolean // chips on the sparks
@@ -187,6 +189,7 @@ export const DEFAULT_PREFS: Prefs = {
   color: 'firedial',
   customColor: '#3f3f46',
   showTitle: true,
+  showIcons: false,
   showCounts: true,
   layout: 'wide',
   showLabels: true,
@@ -242,6 +245,10 @@ export function toSparkUrl(text: string): SparkUrl | null {
   const result = SparkUrl.safeParse(text.trim())
   return result.success ? result.data : null
 }
+
+// Browsers don't let extensions open file:, about: and chrome: URLs, so those sparks copy their URL.
+// Script and inline-document URLs (javascript:, data:, …) are never run from FireDial's page: copied too.
+export const isBlocked = (url: string): boolean => /^\s*(file|about|chrome|javascript|vbscript|data|blob):/i.test(url)
 
 export function normalizeUrl(url: string): string {
   const trimmed = url.trim()
@@ -299,6 +306,7 @@ const PrefsSchema = z.object({
     z.transform((text: string) => toHexColor(text) ?? DEFAULT_PREFS.customColor)
   ),
   showTitle: z.catch(z.boolean(), true),
+  showIcons: z.catch(z.boolean(), false),
   showCounts: z.catch(z.boolean(), true),
   layout: z.catch(z.enum(LAYOUTS), DEFAULT_PREFS.layout),
   showLabels: z.catch(z.boolean(), DEFAULT_PREFS.showLabels),
@@ -512,14 +520,14 @@ export function deleteView<S extends Item>(shelf: Shelf<S>, view: View, withSpar
   return gone
 }
 
-// Moves a view before or after another one in the sidebar.
-export function moveView(doc: Doc, id: ViewId, target: ViewId, after: boolean): void {
-  const view = doc.views.find((each) => each.id === id)
-  if (!view || id === target) return
-  const rest = doc.views.filter((each) => each !== view)
+// Moves views before or after another one in the sidebar, together and in their order.
+export function moveViews(doc: Doc, ids: readonly ViewId[], target: ViewId, after: boolean): void {
+  const moving = new Set(ids)
+  if (moving.has(target)) return
+  const rest = doc.views.filter((each) => !moving.has(each.id))
   const at = rest.findIndex((each) => each.id === target)
   if (at < 0) return
-  rest.splice(after ? at + 1 : at, 0, view)
+  rest.splice(after ? at + 1 : at, 0, ...doc.views.filter((each) => moving.has(each.id)))
   doc.views = rest
 }
 

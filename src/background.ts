@@ -14,6 +14,7 @@ import { parseBackup } from './backup.ts'
 import { BookmarkSync, hasBookmarkFolder, samePage } from './bookmarks.ts'
 import { GoogleDrive } from './drive.ts'
 import { deviceName, forgetToken, googleAuth, revokeAccess, SYNC_DATA } from './google.ts'
+import { SiteIcons } from './icons.ts'
 import { blobToDataUrl, faviconPath, isStoredImage } from './images.ts'
 import { addTo, allocSpark, allocView, isVanilla, newThumbId, nextViewName, SparkId, toLabel, toSparkUrl, ViewId } from './model.ts'
 import type { Doc } from './model.ts'
@@ -76,6 +77,7 @@ async function revealSpark({ viewId, sparkId }: Reveal, tab: browser.tabs.Tab | 
 }
 
 browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (sender.id !== browser.runtime.id) return
   const reveal = RevealMessage.safeParse(message)
   if (reveal.success) void revealSpark(reveal.data, sender.tab)
 })
@@ -108,10 +110,12 @@ async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab |
   const url = toSparkUrl(targetUrl(info, tab))
   if (!url || url.startsWith(browser.runtime.getURL(''))) return
   const title = toLabel((isLink ? info.linkText : tab?.title)?.trim() || url)
-  // A screenshot; the tab's icon only when there is none.
+  // A screenshot as the preview; the tab's icon as its site's, shown while there is none.
   const shot = !isLink && tab?.active ? await screenshot(tab) : ''
-  const icon = !isLink && !shot && tab ? await tabIcon(tab) : ''
-  const src = shot || icon
+  const icon = !isLink && tab ? await tabIcon(tab) : ''
+  const origin = URL.parse(url)?.origin
+  if (icon && origin && origin !== 'null') await siteIcons.save([origin], new Map([[origin, icon]]))
+  const src = shot
   const thumb = src ? newThumbId() : null
 
   const added: (Reveal & { name: string })[] = []
@@ -169,7 +173,8 @@ const PULL_COOLDOWN = 30_000 // ms
 const RETRY_DELAY = 60_000 // ms
 const SyncMessage = z.object({ sync: SyncCommand })
 const drive = new GoogleDrive(googleAuth(async () => (await driveSync.state()).email))
-const driveSync = new Sync(store, browserKeyValue, drive)
+const siteIcons = new SiteIcons(browserKeyValue)
+const driveSync = new Sync(store, browserKeyValue, drive, Date.now, async (name, content) => drive.upload(name, content, await drive.folder('FireDial')))
 let pushTimer: ReturnType<typeof setTimeout> | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -193,7 +198,12 @@ async function syncCommand(command: SyncCommand): Promise<void> {
   }
 }
 
-browser.runtime.onMessage.addListener((message: unknown) => {
+// Sync commands come only from FireDial's own pages, never from the scripts it puts into web pages.
+const fromFireDial = (sender: browser.runtime.MessageSender): boolean =>
+  sender.id === browser.runtime.id && Boolean(sender.url?.startsWith(browser.runtime.getURL('')))
+
+browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (!fromFireDial(sender)) return
   const command = SyncMessage.safeParse(message)
   if (command.success) void syncCommand(command.data.sync)
 })

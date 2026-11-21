@@ -2,6 +2,7 @@
 
 import * as z from 'zod/mini'
 
+import { isStoredImage } from './images.ts'
 import { LabelText, LimitError, LIMITS, listOf, normalizePrefs, plural, Text, toLabelNames, toSparkUrl, View } from './model.ts'
 import type { Doc, ThumbId } from './model.ts'
 import type { ImportedData, ImportedSpark, ImportedView } from './store.ts'
@@ -12,7 +13,7 @@ interface Parsed extends ImportedData {
 
 const twoDigits = (value: number): string => String(value).padStart(2, '0')
 
-// firedial_1999-12-31_235959.json, in local time. auto: made before an import or a delete.
+// firedial_1999-12-31_235959.json, in local time. auto: made before an import, a delete or a sync choice.
 export function backupName(now: Date, auto: boolean): string {
   const date = `${now.getFullYear()}-${twoDigits(now.getMonth() + 1)}-${twoDigits(now.getDate())}`
   const time = [now.getHours(), now.getMinutes(), now.getSeconds()].map(twoDigits).join('')
@@ -64,7 +65,7 @@ export function parseBackup(data: unknown): Parsed {
   const sparks: ImportedSpark[] = []
   for (const { id, title, url: text, thumb, labels } of raw.sparks) {
     const url = toSparkUrl(text)
-    if (url) sparks.push({ key: id, title, url, src: thumb, labels: toLabelNames(labels) })
+    if (url) sparks.push({ key: id, title, url, src: isStoredImage(thumb) ? thumb : '', labels: toLabelNames(labels) }) // only images are kept
   }
   const views: ImportedView[] = []
   for (const item of raw.views) {

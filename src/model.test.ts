@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  isBlocked,
   accentOf,
   addLabels,
   allocSpark,
@@ -153,6 +154,7 @@ test('the default settings, and the accent of each color', () => {
     color: 'firedial',
     customColor: '#3f3f46',
     showTitle: true,
+    showIcons: false,
     showCounts: true,
     layout: 'wide',
     showLabels: true,
@@ -293,4 +295,20 @@ test('All and Unlabeled get back their own rules; Unsorted from an older FireDia
 test('local addresses get http, with the whole IP address', () => {
   assert.equal(searchUrl('10.0.0.12:8080'), 'http://10.0.0.12:8080')
   assert.equal(searchUrl('1.2.3.example'), 'https://1.2.3.example')
+})
+
+test('sparks with a local, browser or script URL are copied, never opened', () => {
+  for (const url of [
+    'file:///C:/a.txt',
+    'about:config',
+    'chrome://settings',
+    'javascript:alert(1)',
+    ' JavaScript:alert(1)',
+    'vbscript:x',
+    'data:text/html,<script>',
+    'blob:https://a.example/1'
+  ])
+    assert.equal(isBlocked(url), true, url)
+  for (const url of ['https://a.example', 'http://localhost:3000', 'ftp://a.example', 'https://a.example/?u=javascript:x'])
+    assert.equal(isBlocked(url), false, url)
 })

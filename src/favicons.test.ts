@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { iconUrls, loadIcons, runAdaptive } from './favicons.ts'
+import { iconUrls, loadIcons, pageStart, runAdaptive } from './favicons.ts'
 
 test('the biggest icon a page names comes first, /favicon.ico last', () => {
   const html = `<head>
@@ -167,4 +167,136 @@ test('each site gets the first icon that loads, from the site itself only', asyn
     asked.every((url) => /^https:\/\/[abc]\.example\//.test(url)),
     asked.join()
   )
+})
+
+test('the limit follows each answer: twice the quickest still counts as steady, slower halves it', async () => {
+  const { now, wait } = clock()
+  const times = [10, 10, 10, 10, 10, 10, 10, 10, 20, 10, 10, 10, 10, 10, 10, 10, 10, 10, 21, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]
+  const seen: string[] = []
+  await runAdaptive(
+    times.map((_, index) => index),
+    async (index) => {
+      await wait(times[index] ?? 0)
+      return true
+    },
+    {
+      now,
+      onDone: (done, pool) => {
+        seen.push(`${done}:${pool.limit}`)
+      }
+    }
+  )
+  assert.equal(
+    seen.join(' '),
+    '1:8 2:8 3:8 4:8 5:8 6:8 7:8 8:10 9:10 10:10 11:10 12:10 13:10 14:10 15:10 16:10 17:10 18:12 19:12 20:12 21:12 22:12 23:12 24:12 25:12 26:12 27:12 28:12 29:12 30:6'
+  )
+})
+
+test('work that throws counts as failed', async () => {
+  const limits: number[] = []
+  await runAdaptive([1, 2], () => Promise.reject(new Error('no')), {
+    onDone: (_, pool) => {
+      limits.push(pool.limit)
+    }
+  })
+  assert.deepEqual(limits, [4, 2])
+})
+
+test('missing items are skipped', async () => {
+  const worked: unknown[] = []
+  await runAdaptive([1, undefined, 2], (item) => {
+    worked.push(item)
+    return Promise.resolve(true)
+  })
+  assert.deepEqual(worked, [1, 2])
+})
+
+test('touch icons rank by size above all others, precomposed ones too', () => {
+  const html = `<link rel="icon" href="/any.svg" sizes="any">
+    <link rel="apple-touch-icon" href="/t120.png" sizes="120x120">
+    <link rel="apple-touch-icon-precomposed" href="/t180.png" sizes="180x180">`
+  assert.deepEqual(iconUrls(html, 'https://a.example/'), [
+    'https://a.example/t180.png',
+    'https://a.example/t120.png',
+    'https://a.example/any.svg',
+    'https://a.example/favicon.ico'
+  ])
+})
+
+test('without <base>, relative icons follow the page address', () => {
+  assert.deepEqual(iconUrls('<link rel="icon" href="i.png">', 'https://a.example/x/y'), ['https://a.example/x/i.png', 'https://a.example/favicon.ico'])
+})
+
+test('a page is read only up to the limit', async () => {
+  let pulled = 0
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulled += 1
+      controller.enqueue(new TextEncoder().encode('abcd'))
+    }
+  })
+  assert.equal(await pageStart(new Response(body), 6), 'abcdab')
+  assert.ok(pulled <= 3, String(pulled))
+  assert.equal(await pageStart(new Response('héllo')), 'héllo')
+  assert.equal(await pageStart(new Response(null)), '')
+})
+
+test('sites are asked without cookies, and a site without page or icon counts as failed', async () => {
+  const inits: RequestInit[] = []
+  const limits: number[] = []
+  const fetcher: typeof fetch = (_, init) => {
+    if (init) inits.push(init)
+    return Promise.resolve(new Response('<link rel="icon" href="/x.png">', { status: 404 }))
+  }
+  const icons = await loadIcons(['https://a.example', 'https://b.example'], () => Promise.resolve('data:image/png,x'), {
+    fetcher,
+    onDone: (_, pool) => {
+      limits.push(pool.limit)
+    }
+  })
+  assert.equal(icons.size, 0, 'a 404 page names no icons, a 404 icon is none')
+  assert.deepEqual(limits, [4, 2])
+  assert.equal(inits.length, 4, 'each site: its page, then only /favicon.ico')
+  for (const init of inits) {
+    assert.equal(init.credentials, 'omit')
+    assert.equal(init.redirect, 'follow')
+    assert.ok(init.signal instanceof AbortSignal)
+  }
+})
+
+test('a site whose page loads counts as working even without an icon, one with an icon too', async () => {
+  const limits: number[] = []
+  const fetcher: typeof fetch = (input) =>
+    Promise.resolve((typeof input === 'string' ? input : '').endsWith('/') ? new Response('<p>', { status: 200 }) : new Response('', { status: 404 }))
+  await loadIcons(['https://a.example'], () => Promise.resolve(null), {
+    fetcher,
+    onDone: (_, pool) => {
+      limits.push(pool.limit)
+    }
+  })
+  assert.deepEqual(limits, [8])
+  const found = await loadIcons(['https://b.example'], () => Promise.resolve('data:image/png,x'), {
+    fetcher: () => Promise.resolve(new Response('', { status: 200 })),
+    onDone: (_, pool) => {
+      limits.push(pool.limit)
+    }
+  })
+  assert.equal(found.get('https://b.example'), 'data:image/png,x')
+  assert.deepEqual(limits, [8, 8])
+})
+
+test('a character split over two parts of a page stays whole', async () => {
+  const bytes = new TextEncoder().encode('é')
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, 1))
+      controller.enqueue(bytes.subarray(1))
+      controller.close()
+    }
+  })
+  assert.equal(await pageStart(new Response(body)), 'é')
+})
+
+test('an icon that is only a query belongs to the page itself', () => {
+  assert.deepEqual(iconUrls('<link rel="icon" href="?v=2">', 'https://a.example/x/y'), ['https://a.example/x/y?v=2', 'https://a.example/favicon.ico'])
 })
