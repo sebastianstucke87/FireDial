@@ -146,3 +146,13 @@ test('a site found without an icon lately is looked at again once Previews is se
     js("return [...document.querySelectorAll('#sparks .Spark[data-id] .Thumb')].every((thumb) => thumb.querySelector('img'))")
   )
 })
+
+test('Previews set to Icon asks for site access in Firefox, which keeps no icons for add-ons', async () => {
+  await js('document.querySelector(\'[data-setting="previews"] [data-value="shot"]\').click()')
+  await js('return browser.permissions.remove({ origins: ["<all_urls>"] })')
+  if (!(await js<boolean>("return document.body.classList.contains('editing')"))) await js("document.querySelector('#editToggle').click()")
+  const icon = await driver.findElement(By.css('[data-setting="previews"] [data-value="icon"]'))
+  await driver.executeScript('arguments[0].scrollIntoView({ block: "center" })', icon)
+  await icon.click()
+  await until('the access', () => js('return browser.permissions.contains({ origins: ["<all_urls>"] })'))
+})

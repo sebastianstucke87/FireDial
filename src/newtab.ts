@@ -771,11 +771,13 @@ async function removeFromActive(ids: ReadonlySet<SparkId>): Promise<void> {
 // Puts the sparks before or after the target spark in the open view's order; without a target, at its end.
 // The previews go, as one step to undo: the sparks show their site's icon instead.
 async function clearPreviews(sparks: readonly Spark[]): Promise<void> {
+  const access = askIconAccess() // first of all: only the click itself may ask
   const ids = new Set(sparks.map((spark) => spark.id))
   await change((doc) => {
     for (const spark of doc.sparks) if (ids.has(spark.id)) spark.thumb = null
     return undefined
   })
+  await access
   await findIcons(
     store.doc.sparks.filter((spark) => ids.has(spark.id)),
     'all'
@@ -2102,9 +2104,13 @@ document.addEventListener('click', (event) => {
   const value = setting?.dataset['value']
   if (name && value) {
     if (name === 'color') honeycombPanel.hidden = value !== 'custom' || !honeycombPanel.hidden
+    const icons = name === 'previews' && value === 'icon'
+    const access = icons ? askIconAccess() : Promise.resolve(false) // only the click itself may ask
     void changePrefs((prefs) => {
       applySetting(prefs, name, value)
-    }).then(() => (name === 'previews' && value === 'icon' ? findIcons(store.doc.sparks, 'all') : undefined))
+    })
+      .then(() => access)
+      .then(() => (icons ? findIcons(store.doc.sparks, 'all') : undefined))
     return
   }
 
@@ -2412,6 +2418,12 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
 }
 
 const ICON_BATCH = 300 // ms of found icons shown together
+
+// Firefox keeps no icons for add-ons: they come from the sites, which takes access to them. Asked
+// for by the click that makes sparks show icons; Chrome has its own copies of the sites visited.
+function askIconAccess(): Promise<boolean> {
+  return IS_CHROME ? Promise.resolve(false) : browser.permissions.request(ALL_SITES).catch(() => false)
+}
 // Sites the browser keeps closed to add-ons, site access or not: asking them only gets an error.
 const CLOSED_SITES = new Set(IS_CHROME ? ['https://chrome.google.com', 'https://chromewebstore.google.com'] : [])
 const iconCard = html('#iconCard')
