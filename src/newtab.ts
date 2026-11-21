@@ -2382,7 +2382,7 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
       return
     }
     await siteIcons.save([...found.keys()], found)
-    const rest = due.filter((origin) => !found.has(origin))
+    const rest = due.filter((origin) => !found.has(origin) && !CLOSED_SITES.has(origin))
     if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
       // Shown in batches, not one by one: each one shown draws the sparks anew.
       let batch = new Map<string, string>()
@@ -2412,6 +2412,8 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
 }
 
 const ICON_BATCH = 300 // ms of found icons shown together
+// Sites the browser keeps closed to add-ons, site access or not: asking them only gets an error.
+const CLOSED_SITES = new Set(IS_CHROME ? ['https://chrome.google.com', 'https://chromewebstore.google.com'] : [])
 const iconCard = html('#iconCard')
 const iconBar = $('#iconBar', HTMLProgressElement)
 
