@@ -774,3 +774,14 @@ test('data bookmarks: ten parts and more read back; a stray, mixed or unreadable
     'an order that is no list is empty'
   )
 })
+
+test('data bookmarks with parts out of place are broken', () => {
+  const data = (...parts: string[]): TreeNode[] =>
+    parts.map((part, index) => ({ id: `n${index}`, title: '', type: 'bookmark', url: `https://firedial.invalid/labels/${part}` }))
+  assert.deepEqual(readLabelData(data('1-1#%7B%7D')), new Map(), 'whole')
+  assert.equal(readLabelData(data('1-2#%7B%7D', '3-2#x')), null, 'a part past the last')
+  assert.equal(readLabelData(data('0-1#%7B%7D')), null, 'a part before the first')
+  assert.equal(readLabelData(data('1-2#%7B', '2-3#%7D')), null, 'parts of different counts')
+  assert.equal(readLabelData(data('x1-1#%7B%7D')), null, 'not at the start')
+  assert.equal(readLabelData(data('1-0#')), null, 'no parts')
+})
