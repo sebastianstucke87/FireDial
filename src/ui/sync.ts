@@ -50,6 +50,8 @@ export function statusText(state: SyncState, now = Date.now()): string {
 
 let syncing = false // sync is on: replacing everything here replaces it in the other browsers too
 
+export const isSyncing = (): boolean => syncing
+
 // A question about replacing all sparks, saying so when sync carries it on.
 export const acrossBrowsers = (question: Question): Question =>
   syncing ? { ...question, text: `${question.text} Your other synced browsers follow.` } : question

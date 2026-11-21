@@ -69,7 +69,7 @@ import { Dropdown } from './ui/dropdown.ts'
 import type { Choice } from './ui/dropdown.ts'
 import { editable } from './ui/editable.ts'
 import { Modal } from './ui/modal.ts'
-import { acrossBrowsers, initSync, saveToDrive } from './ui/sync.ts'
+import { acrossBrowsers, initSync, isSyncing, saveToDrive } from './ui/sync.ts'
 import { showToast, toastArgs } from './ui/toast.ts'
 
 const THUMB_MAX_WIDTH = 640
@@ -1281,7 +1281,7 @@ async function importFile(file: File): Promise<string> {
   if (file.size > LIMITS.backupBytes) throw new LimitError('The file is larger than 1 GB')
   showImport('Reading the file')
   const backup = readBackup(await file.text())
-  showImport('Saving a backup before import')
+  showImport(isSyncing() ? 'Saving a remote backup before import' : 'Saving a backup before import')
   await autoBackup('imported')
   let done = 0
   const sparks = []
