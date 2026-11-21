@@ -15,13 +15,14 @@ export const SYNC_DATA: browser._manifest.OptionalDataCollectionPermission[] = [
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file'
 const TOKEN = 'syncToken' // in storage.session: gone when the browser closes
 
-function authUrl(interactive: boolean, hint: string): string {
+function authUrl(interactive: boolean, hint: string, state: string): string {
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
   url.search = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     response_type: 'token',
     redirect_uri: browser.identity.getRedirectURL(),
     scope: SCOPE,
+    state,
     ...(interactive ? { prompt: 'select_account' } : { prompt: 'none' }),
     ...(hint ? { login_hint: hint } : {})
   }).toString()
@@ -30,13 +31,17 @@ function authUrl(interactive: boolean, hint: string): string {
 
 export async function signIn(interactive: boolean, hint = ''): Promise<string> {
   if (!navigator.onLine) throw new OfflineError('Offline')
+  // Comes back with the answer: one that doesn't carry it wasn't asked for by this sign-in.
+  const state = crypto.randomUUID()
   let result: string
   try {
-    result = await browser.identity.launchWebAuthFlow({ url: authUrl(interactive, hint), interactive })
+    result = await browser.identity.launchWebAuthFlow({ url: authUrl(interactive, hint, state), interactive })
   } catch {
     throw new SignInError('Google sign-in needs the user')
   }
-  const token = new URLSearchParams(new URL(result).hash.slice(1)).get('access_token')
+  const answer = new URLSearchParams(new URL(result).hash.slice(1))
+  if (answer.get('state') !== state) throw new SignInError('Google sign-in answered another request')
+  const token = answer.get('access_token')
   if (!token) throw new SignInError('Google sign-in gave no token')
   await browser.storage.session.set({ [TOKEN]: token })
   return token

@@ -7,6 +7,12 @@ test('only data URLs count as stored images', () => {
   assert.equal(isStoredImage('https://example.com/favicon.ico'), false)
   assert.equal(isStoredImage('http://example.com/a.png'), false)
   assert.equal(isStoredImage(''), false)
+  assert.equal(isStoredImage('data:image/svg+xml,<svg/>'), true)
+  assert.equal(isStoredImage('DATA:IMAGE/JPEG;base64,AAAA'), true)
+  assert.equal(isStoredImage('data:text/html,<script>alert(1)</script>'), false)
+  assert.equal(isStoredImage('data:,image/png'), false)
+  assert.equal(isStoredImage('data:image/'), false)
+  assert.equal(isStoredImage('javascript:alert(1)'), false)
 })
 
 test('a blob becomes a data URL of its type and bytes', async () => {

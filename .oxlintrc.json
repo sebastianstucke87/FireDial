@@ -3,6 +3,7 @@
   "plugins": ["typescript", "oxc", "import", "node"],
   "categories": { "correctness": "error", "suspicious": "error" },
   "ignorePatterns": ["dist/"],
+  "overrides": [{ "files": ["**/*.test.ts"], "rules": { "no-script-url": "off" } }],
   "rules": {
     "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
     "typescript/no-explicit-any": "error",
