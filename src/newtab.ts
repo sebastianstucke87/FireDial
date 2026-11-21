@@ -1968,6 +1968,14 @@ main.addEventListener('pointerdown', (event) => {
   if (!event.shiftKey) clearSelection()
 })
 
+// Above the sparks too: the space around the search and the sort, not their controls.
+html('.Top').addEventListener('pointerdown', (event) => {
+  if (!editing || event.button !== 0 || closest(event, 'input, button, label, a, [role], .Suggest')) return
+  event.preventDefault()
+  startBand(event)
+  if (!event.shiftKey) clearSelection()
+})
+
 html('.Rail').addEventListener('pointerdown', (event) => {
   if (!editing || event.button !== 0 || closest(event, '.Handle, .NameInput, .NewGroup, .NewGroupInput, .Rail__resize')) return
   if (event.target === groupsNav && event.offsetX >= groupsNav.clientWidth) return // scrollbar
