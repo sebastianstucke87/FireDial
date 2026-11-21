@@ -3,6 +3,7 @@
   "plugins": ["typescript", "oxc", "import", "node"],
   "categories": { "correctness": "error", "suspicious": "error" },
   "ignorePatterns": ["dist/"],
+  "overrides": [{ "files": ["**/*.test.ts"], "rules": { "no-script-url": "off" } }],
   "rules": {
     "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
     "typescript/no-explicit-any": "error",
@@ -16,6 +17,18 @@
     "typescript/no-unsafe-return": "error",
     "typescript/no-unnecessary-condition": "error",
     "typescript/no-unnecessary-type-assertion": "error",
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "unicorn/prefer-dom-node-text-content": "error",
+    "no-restricted-properties": [
+      "error",
+      { "property": "innerHTML", "message": "Build nodes with el() and textContent: no HTML from strings." },
+      { "property": "outerHTML", "message": "Build nodes with el() and textContent: no HTML from strings." },
+      { "property": "insertAdjacentHTML", "message": "Build nodes with el() and textContent: no HTML from strings." },
+      { "object": "document", "property": "write", "message": "No HTML from strings." }
+    ],
     "no-shadow": "off",
     "no-underscore-dangle": "off"
   }

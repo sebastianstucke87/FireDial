@@ -76,6 +76,7 @@ async function revealSpark({ viewId, sparkId }: Reveal, tab: browser.tabs.Tab | 
 }
 
 browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (sender.id !== browser.runtime.id) return
   const reveal = RevealMessage.safeParse(message)
   if (reveal.success) void revealSpark(reveal.data, sender.tab)
 })
@@ -169,7 +170,7 @@ const PULL_COOLDOWN = 30_000 // ms
 const RETRY_DELAY = 60_000 // ms
 const SyncMessage = z.object({ sync: SyncCommand })
 const drive = new GoogleDrive(googleAuth(async () => (await driveSync.state()).email))
-const driveSync = new Sync(store, browserKeyValue, drive)
+const driveSync = new Sync(store, browserKeyValue, drive, Date.now, async (name, content) => drive.upload(name, content, await drive.folder('FireDial')))
 let pushTimer: ReturnType<typeof setTimeout> | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -193,7 +194,12 @@ async function syncCommand(command: SyncCommand): Promise<void> {
   }
 }
 
-browser.runtime.onMessage.addListener((message: unknown) => {
+// Sync commands come only from FireDial's own pages, never from the scripts it puts into web pages.
+const fromFireDial = (sender: browser.runtime.MessageSender): boolean =>
+  sender.id === browser.runtime.id && Boolean(sender.url?.startsWith(browser.runtime.getURL('')))
+
+browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (!fromFireDial(sender)) return
   const command = SyncMessage.safeParse(message)
   if (command.success) void syncCommand(command.data.sync)
 })

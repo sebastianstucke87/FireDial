@@ -6,9 +6,11 @@ import type { Drive, DriveFile } from './drive.ts'
 import { OfflineError, SignInError } from './drive.ts'
 import { allocSpark, allocView, emptyDoc, LabelName, newThumbId, SparkId, SparkUrl, toLabel } from './model.ts'
 import type { Doc } from './model.ts'
+import { backupName } from './backup.ts'
 import { Store, thumbKey } from './store.ts'
 import type { KeyValue, Lock } from './store.ts'
 import { parseSyncState, rebase, Sync, SyncCommand } from './sync.ts'
+import type { Keep } from './sync.ts'
 
 function memory(): KeyValue & { data: Map<string, unknown> } {
   const data = new Map<string, unknown>()
@@ -95,11 +97,11 @@ interface Browser {
   sync: Sync
 }
 
-async function browserWith(drive: Drive): Promise<Browser> {
+async function browserWith(drive: Drive, keep?: Keep): Promise<Browser> {
   const kv = memory()
   const store = new Store(kv, queue())
   await store.load()
-  const sync = new Sync(store, kv, drive, () => 1000)
+  const sync = new Sync(store, kv, drive, () => 1000, keep)
   return { kv, store, sync }
 }
 
@@ -137,6 +139,20 @@ test('first sync with an empty Drive uploads this browser', async () => {
   assert.equal(state.status, 'ok')
   assert.equal(state.version, 1)
   assert.deepEqual(state.last, { device: 'Firefox on Windows', at: 1000 })
+})
+
+test('a preview on Drive that is no image is left out', async () => {
+  const drive = new FakeDrive()
+  const a = await browserWith(drive)
+  await add(a.store, 'a', 'data:image/png;base64,AAAA')
+  await a.sync.start('Firefox on Windows')
+  for (const file of drive.files.values()) if (file.name.startsWith('thumb-')) file.content = 'data:text/html,<p>'
+  const b = await browserWith(drive)
+  await b.sync.start('Chrome on Windows')
+  assert.deepEqual(titles(b.store), ['a'])
+  const thumb = b.store.doc.sparks[0]?.thumb
+  assert.ok(thumb)
+  assert.equal(b.kv.data.get(thumbKey(thumb)), undefined)
 })
 
 test('a browser without sparks takes Drive as it is, images too', async () => {
@@ -256,6 +272,54 @@ test('sparks on both sides: the user picks this browser', async () => {
   assert.deepEqual(titles(b.store), ['mine'])
   await a.sync.run(true)
   assert.deepEqual(titles(a.store), ['mine'])
+})
+
+// A Keep that remembers each backup's name and its sparks' titles and previews.
+function kept(): { keep: Keep; files: { name: string; sparks: { title: string; thumb: string }[] }[] } {
+  const files: { name: string; sparks: { title: string; thumb: string }[] }[] = []
+  const keep: Keep = async (name, content) => {
+    const { sparks } = z.object({ sparks: z.array(z.object({ title: z.string(), thumb: z.string() })) }).parse(JSON.parse(await content.text()))
+    files.push({ name, sparks })
+  }
+  return { keep, files }
+}
+
+test('the side the choice replaces is kept as a backup first, previews too', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  const first = await browserWith(drive)
+  await add(first.store, 'theirs', 'data:image/png;base64,AAAA')
+  await first.sync.start('Firefox on Windows')
+  await first.sync.choose('local')
+  const picksDrive = kept()
+  const b = await browserWith(drive, picksDrive.keep)
+  await add(b.store, 'mine', 'data:image/png;base64,BBBB')
+  await b.sync.start('Chrome on Windows')
+  await b.sync.choose('drive')
+  assert.deepEqual(picksDrive.files, [{ name: backupName(new Date(1000), true), sparks: [{ title: 'mine', thumb: 'data:image/png;base64,BBBB' }] }])
+  const picksLocal = kept()
+  const c = await browserWith(drive, picksLocal.keep)
+  await add(c.store, 'other')
+  await c.sync.start('Chrome on Windows')
+  await c.sync.choose('local')
+  assert.deepEqual(picksLocal.files[0]?.sparks, [{ title: 'theirs', thumb: 'data:image/png;base64,AAAA' }])
+  assert.deepEqual(titles(c.store), ['other'])
+})
+
+test('without a backup, the choice replaces nothing and sync stops', async () => {
+  const drive = new FakeDrive()
+  await synced(drive, 'a')
+  const b = await browserWith(drive, () => Promise.reject(new Error('quota')))
+  await add(b.store, 'mine')
+  await b.sync.start('Chrome on Windows')
+  await b.sync.choose('drive')
+  assert.deepEqual(titles(b.store), ['mine'])
+  const state = await b.sync.state()
+  assert.equal(state.on, false)
+  assert.equal(state.problem, 'Sync not started: the backup failed')
+  await b.sync.run(true)
+  assert.deepEqual(titles(b.store), ['mine'])
+  assert.equal(b.kv.data.has('syncBase'), false)
 })
 
 test('no connection or an expired sign-in shows in the status', async () => {

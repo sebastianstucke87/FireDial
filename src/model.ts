@@ -12,6 +12,7 @@ export const LIMITS = {
   url: 4_000,
   label: 400,
   backupBytes: 1024 ** 3,
+  imageBytes: 20 * 1024 ** 2, // an image file or one from a link, before it's scaled down
   labelsPerSpark: 50
 } as const
 
@@ -242,6 +243,10 @@ export function toSparkUrl(text: string): SparkUrl | null {
   const result = SparkUrl.safeParse(text.trim())
   return result.success ? result.data : null
 }
+
+// Browsers don't let extensions open file:, about: and chrome: URLs, so those sparks copy their URL.
+// Script and inline-document URLs (javascript:, data:, …) are never run from FireDial's page: copied too.
+export const isBlocked = (url: string): boolean => /^\s*(file|about|chrome|javascript|vbscript|data|blob):/i.test(url)
 
 export function normalizeUrl(url: string): string {
   const trimmed = url.trim()

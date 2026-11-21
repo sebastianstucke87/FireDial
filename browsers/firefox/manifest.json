@@ -19,6 +19,9 @@
   },
   "permissions": ["activeTab", "bookmarks", "downloads", "identity", "menus", "scripting", "search", "storage", "unlimitedStorage"],
   "optional_host_permissions": ["<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https: http: data: blob:"
+  },
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
