@@ -1,8 +1,10 @@
 // Icons for sparks without a picture, from each site itself: its home page names the icons, the
 // biggest one wins, /favicon.ico when it names none. No other service hears of the sites.
 //
-// Many sites at once, as many as keep answering fast: a few to begin with, more while the times
-// stay steady, half as many as soon as they climb or fail.
+// Many sites at once, as many as keep answering fast: a few to begin with, more while the typical
+// time stays steady, half as many as soon as it climbs. Typical is the middle of the last few
+// answers, a failure counting as the slowest: one slow or dead site among them changes nothing,
+// as sites differ anyway; most of them slowing down or failing does.
 
 const FETCH_TIMEOUT = 6000 // ms, for a page or an icon
 const START = 8
@@ -10,6 +12,7 @@ const MOST = 20
 const FEWEST = 2
 const STEP = 2
 const SLOWER = 2 // times the steady time that count as climbing
+const WINDOW = 8 // the last answers whose middle time is the typical one
 const PAGE_MAX = 1024 ** 2 // bytes of a home page read for its icons, which its head names
 
 interface IconLink {
@@ -64,22 +67,27 @@ export interface Pool {
 export async function runAdaptive<Item>(
   items: readonly Item[],
   work: (item: Item) => Promise<boolean>, // false: it failed
-  options: { now?: () => number; signal?: AbortSignal; onDone?: (done: number, pool: Pool) => void } = {}
+  options: { now?: () => number; signal?: AbortSignal; onDone?: (done: number, pool: Pool, ok: boolean) => void } = {}
 ): Promise<void> {
   const now = options.now ?? (() => performance.now())
   const pool = { limit: START }
   let next = 0
   let running = 0
   let done = 0
-  let steady = Infinity // the quickest time seen so far
+  let steady = Infinity // the quickest typical time so far
+  let recent: number[] = []
   let sinceChange = 0
 
   const settle = (time: number, ok: boolean): void => {
-    steady = Math.min(steady, time)
-    if (!ok || time > steady * SLOWER) {
+    recent = [...recent, ok ? time : Infinity].slice(-WINDOW)
+    const sorted = recent.toSorted((a, b) => a - b)
+    const typical = sorted[Math.floor((sorted.length - 1) / 2)] ?? time
+    if (recent.length === WINDOW) steady = Math.min(steady, typical)
+    if (recent.length === WINDOW && (typical === Infinity || typical > steady * SLOWER)) {
       pool.limit = Math.max(FEWEST, Math.floor(pool.limit / 2))
+      recent = [] // judged anew on the answers from now on
       sinceChange = 0
-    } else if (++sinceChange >= pool.limit) {
+    } else if (ok && ++sinceChange >= pool.limit) {
       pool.limit = Math.min(MOST, pool.limit + STEP)
       sinceChange = 0
     }
@@ -103,7 +111,7 @@ export async function runAdaptive<Item>(
             running -= 1
             done += 1
             settle(Math.max(1, now() - start), ok)
-            options.onDone?.(done, pool)
+            options.onDone?.(done, pool, ok)
             fill()
           })
       }
@@ -136,11 +144,18 @@ async function fetchWithin(url: string, signal?: AbortSignal, fetcher: typeof fe
 }
 
 // The icon of each site, by origin. toImage turns an answer into what's kept (a data URL), or
-// null when it's no usable image. Sites without one are missing from the result.
+// null when it's no usable image. Sites without one are missing from the result; onIcon hears of
+// each one found at once.
 export async function loadIcons(
   origins: readonly string[],
   toImage: (response: Response) => Promise<string | null>,
-  options: { fetcher?: typeof fetch; signal?: AbortSignal; now?: () => number; onDone?: (done: number, pool: Pool) => void } = {}
+  options: {
+    fetcher?: typeof fetch
+    signal?: AbortSignal
+    now?: () => number
+    onDone?: (done: number, pool: Pool, ok: boolean) => void
+    onIcon?: (origin: string, src: string) => void
+  } = {}
 ): Promise<Map<string, string>> {
   const found = new Map<string, string>()
   const fetcher = options.fetcher ?? fetch
@@ -161,6 +176,7 @@ export async function loadIcons(
           const image = response.ok ? await toImage(response) : null
           if (image) {
             found.set(origin, image)
+            options.onIcon?.(origin, image)
             return true
           }
         } catch {

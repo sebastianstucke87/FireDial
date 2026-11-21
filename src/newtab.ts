@@ -770,12 +770,18 @@ async function removeFromActive(ids: ReadonlySet<SparkId>): Promise<void> {
 
 // Puts the sparks before or after the target spark in the open view's order; without a target, at its end.
 // The previews go, as one step to undo: the sparks show their site's icon instead.
-function clearPreviews(sparks: readonly Spark[]): Promise<void> {
+async function clearPreviews(sparks: readonly Spark[]): Promise<void> {
+  const access = askIconAccess() // first of all: only the click itself may ask
   const ids = new Set(sparks.map((spark) => spark.id))
-  return change((doc) => {
+  await change((doc) => {
     for (const spark of doc.sparks) if (ids.has(spark.id)) spark.thumb = null
     return undefined
   })
+  await access
+  await findIcons(
+    store.doc.sparks.filter((spark) => ids.has(spark.id)),
+    'all'
+  )
 }
 
 function reorderSparks(ids: ReadonlySet<SparkId>, targetId: SparkId | null, after: boolean): Promise<void> {
@@ -2098,9 +2104,13 @@ document.addEventListener('click', (event) => {
   const value = setting?.dataset['value']
   if (name && value) {
     if (name === 'color') honeycombPanel.hidden = value !== 'custom' || !honeycombPanel.hidden
+    const icons = name === 'previews' && value === 'icon'
+    const access = icons ? askIconAccess() : Promise.resolve(false) // only the click itself may ask
     void changePrefs((prefs) => {
       applySetting(prefs, name, value)
     })
+      .then(() => access)
+      .then(() => (icons ? findIcons(store.doc.sparks, 'all') : undefined))
     return
   }
 
@@ -2287,7 +2297,7 @@ async function importBookmarks(): Promise<void> {
   if (added.size) notify(`Imported ${plural(added.size, 'bookmark')}${plan.views.length ? `, ${plural(plan.views.length, 'new view')}` : ''}`)
   await findIcons(
     store.doc.sparks.filter((spark) => added.has(spark.id)),
-    true
+    'all'
   )
 }
 
@@ -2354,35 +2364,84 @@ function iconOf(spark: Spark): string {
   return origin ? siteIcons.get(origin) : ''
 }
 
-// force: also the sites found without one lately (site access was just allowed, say).
-async function findIcons(sparks: readonly Spark[], force = false): Promise<void> {
+// The sites to look for: those never looked for, or found without an icon a while ago ('due'); all
+// without an icon ('all': site access was just allowed, say); or all without one, in the browser's
+// copies only ('browser': cheap, for sites just visited). Found icons show as they come in; a look
+// at the sites themselves shows its progress.
+async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'browser' = 'due'): Promise<void> {
   const pages = new Map<string, string>() // a page of each site, for the browser's copy
   for (const spark of sparks) {
     const origin = wantsIcon(spark) ? originOf(spark.url) : null
     if (origin && !pages.has(origin)) pages.set(origin, spark.url)
   }
   await siteIcons.load([...pages.keys()])
-  const due = (force ? [...pages.keys()].filter((origin) => !siteIcons.get(origin)) : siteIcons.due([...pages.keys()])).filter(
-    (origin) => !lookingFor.has(origin)
-  )
-  if (!due.length) return
+  const missing = [...pages.keys()].filter((origin) => !siteIcons.get(origin))
+  const due = (which === 'due' ? siteIcons.due([...pages.keys()]) : missing).filter((origin) => !lookingFor.has(origin))
+  if (!due.length || (which === 'browser' && !IS_CHROME)) return
   for (const origin of due) lookingFor.add(origin)
   const found = new Map<string, string>()
   try {
-    for (const origin of due) {
-      const icon = await browserIcon(pages.get(origin) ?? origin)
-      if (icon) found.set(origin, icon)
+    const fromBrowser = await Promise.all(due.map(async (origin) => [origin, await browserIcon(pages.get(origin) ?? origin)] as const))
+    for (const [origin, icon] of fromBrowser) if (icon) found.set(origin, icon)
+    if (which === 'browser') {
+      await siteIcons.save([...found.keys()], found) // the others stay as they were
+      return
     }
-    const rest = due.filter((origin) => !found.has(origin))
+    await siteIcons.save([...found.keys()], found)
+    const rest = due.filter((origin) => !found.has(origin) && !CLOSED_SITES.has(origin))
     if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
-      for (const [origin, src] of await loadIcons(rest, iconImage)) found.set(origin, src)
+      // Shown in batches, not one by one: each one shown draws the sparks anew.
+      let batch = new Map<string, string>()
+      const timer = setInterval(() => {
+        const shown = batch
+        batch = new Map()
+        void siteIcons.save([...shown.keys()], shown)
+      }, ICON_BATCH)
+      showIconCard(0, rest.length)
+      const fromSites = await loadIcons(rest, iconImage, {
+        onDone: (done) => {
+          showIconCard(done, rest.length)
+        },
+        onIcon: (origin, src) => {
+          batch.set(origin, src)
+        }
+      }).finally(() => {
+        clearInterval(timer)
+      })
+      for (const [origin, src] of fromSites) found.set(origin, src)
     }
     await siteIcons.save(due, found)
   } finally {
     for (const origin of due) lookingFor.delete(origin)
+    iconCard.hidden = true
   }
-  if (found.size) await renderSparks()
 }
+
+const ICON_BATCH = 300 // ms of found icons shown together
+
+// Firefox keeps no icons for add-ons: they come from the sites, which takes access to them. Asked
+// for by the click that makes sparks show icons; Chrome has its own copies of the sites visited.
+function askIconAccess(): Promise<boolean> {
+  return IS_CHROME ? Promise.resolve(false) : browser.permissions.request(ALL_SITES).catch(() => false)
+}
+// Sites the browser keeps closed to add-ons, site access or not: asking them only gets an error.
+const CLOSED_SITES = new Set(IS_CHROME ? ['https://chrome.google.com', 'https://chromewebstore.google.com'] : [])
+const iconCard = html('#iconCard')
+const iconBar = $('#iconBar', HTMLProgressElement)
+
+function showIconCard(done: number, total: number): void {
+  html('#iconCardText').textContent = `Finding icons: ${done} of ${total}`
+  iconBar.value = done / total
+  iconCard.hidden = false
+}
+
+// Back from another tab: sites visited meanwhile may be in the browser's copies now.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void findIcons(store.doc.sparks, 'browser')
+})
+
+// Site access just allowed: the sites found without an icon may have one after all.
+browser.permissions.onAdded.addListener(() => void findIcons(store.doc.sparks, 'all'))
 
 browserKeyValue.onChanged((keys) => {
   const origins = [...keys].map(originOfKey).filter((origin) => origin !== null)
@@ -2394,7 +2453,7 @@ browserKeyValue.onChanged((keys) => {
 // Previews, taken again: each page opens in a tab of its own, is captured once it has loaded, and
 // the tab closes; FireDial's tab comes back. A page that can't be captured keeps what it had.
 
-const PAGE_WAIT = 15_000 // ms at most for a page to load
+const PAGE_WAIT = 6000 // ms at most for a page to load; then it is captured as it is
 const PAGE_SETTLE = 600 // ms after loading, for late images and fonts
 
 // Once the tab has loaded, after PAGE_WAIT, or on a cancel.
@@ -2545,6 +2604,8 @@ async function refreshPreviews(sparks: readonly Spark[]): Promise<void> {
       { thumbs: images }
     )
   }
+  // The pages were just open: the browser has their icons now, and the sites let FireDial in.
+  void findIcons(wanted, 'all')
   // Cancelled ones aren't failures: the card going away says enough.
   if (chosen.size < tried) notify(chosen.size ? `Refreshed ${chosen.size} of ${plural(tried, 'preview')}` : 'No preview could be taken')
 }

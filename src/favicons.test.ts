@@ -169,10 +169,10 @@ test('each site gets the first icon that loads, from the site itself only', asyn
   )
 })
 
-test('the limit follows each answer: twice the quickest still counts as steady, slower halves it', async () => {
+test('one slow answer among quick ones changes nothing; the typical time climbing halves the limit', async () => {
   const { now, wait } = clock()
-  const times = [10, 10, 10, 10, 10, 10, 10, 10, 20, 10, 10, 10, 10, 10, 10, 10, 10, 10, 21, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]
-  const seen: string[] = []
+  const times = [...Array<number>(8).fill(10), 1000, ...Array<number>(11).fill(10), ...Array<number>(12).fill(30)]
+  const seen: number[] = []
   await runAdaptive(
     times.map((_, index) => index),
     async (index) => {
@@ -181,25 +181,28 @@ test('the limit follows each answer: twice the quickest still counts as steady, 
     },
     {
       now,
-      onDone: (done, pool) => {
-        seen.push(`${done}:${pool.limit}`)
+      onDone: (_, pool) => {
+        seen.push(pool.limit)
       }
     }
   )
-  assert.equal(
-    seen.join(' '),
-    '1:8 2:8 3:8 4:8 5:8 6:8 7:8 8:10 9:10 10:10 11:10 12:10 13:10 14:10 15:10 16:10 17:10 18:12 19:12 20:12 21:12 22:12 23:12 24:12 25:12 26:12 27:12 28:12 29:12 30:6'
-  )
+  const drop = seen.findIndex((limit, index) => index > 0 && limit < (seen[index - 1] ?? 0))
+  assert.ok(drop >= 20, `no halving for the one slow answer: ${seen.join()}`)
+  assert.ok(Math.min(...seen.slice(20)) < Math.max(...seen.slice(0, 20)), `halved once most answers are slower: ${seen.join()}`)
 })
 
-test('work that throws counts as failed', async () => {
+test('work that throws counts as failed: most of the last answers failing halves the limit', async () => {
   const limits: number[] = []
-  await runAdaptive([1, 2], () => Promise.reject(new Error('no')), {
-    onDone: (_, pool) => {
-      limits.push(pool.limit)
+  await runAdaptive(
+    Array.from({ length: 16 }, (_, index) => index),
+    () => Promise.reject(new Error('no')),
+    {
+      onDone: (_, pool) => {
+        limits.push(pool.limit)
+      }
     }
-  })
-  assert.deepEqual(limits, [4, 2])
+  )
+  assert.deepEqual(limits, [...Array<number>(7).fill(8), 4, ...Array<number>(7).fill(4), 2])
 })
 
 test('missing items are skipped', async () => {
@@ -243,19 +246,19 @@ test('a page is read only up to the limit', async () => {
 
 test('sites are asked without cookies, and a site without page or icon counts as failed', async () => {
   const inits: RequestInit[] = []
-  const limits: number[] = []
+  const oks: boolean[] = []
   const fetcher: typeof fetch = (_, init) => {
     if (init) inits.push(init)
     return Promise.resolve(new Response('<link rel="icon" href="/x.png">', { status: 404 }))
   }
   const icons = await loadIcons(['https://a.example', 'https://b.example'], () => Promise.resolve('data:image/png,x'), {
     fetcher,
-    onDone: (_, pool) => {
-      limits.push(pool.limit)
+    onDone: (_, __, ok) => {
+      oks.push(ok)
     }
   })
   assert.equal(icons.size, 0, 'a 404 page names no icons, a 404 icon is none')
-  assert.deepEqual(limits, [4, 2])
+  assert.deepEqual(oks, [false, false])
   assert.equal(inits.length, 4, 'each site: its page, then only /favicon.ico')
   for (const init of inits) {
     assert.equal(init.credentials, 'omit')
