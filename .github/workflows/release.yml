@@ -75,6 +75,10 @@ jobs:
           cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
           package-manager-cache: false
       - run: npm ci
+      # Every package must carry the npm registry's signature: a tampered tarball fails here.
+      - run: npm audit signatures
+      # Known vulnerabilities in what ships with the extension (zod), not the dev tools.
+      - run: npm audit --omit=dev --audit-level=moderate
 
       - name: Take the version from the tag
         if: env.RELEASE == 'true'

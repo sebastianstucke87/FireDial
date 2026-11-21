@@ -58,6 +58,7 @@ export function showToast(text: string, ms: number, background: string, color: s
   while (stack.children.length > 3) stack.firstElementChild?.remove()
   setTimeout(remove, ms)
   toast.addEventListener('click', (event) => {
+    if (!event.isTrusted) return // a click the web page made up, not the user's
     if (event.target === dismiss) {
       remove()
     } else if (reveal) {

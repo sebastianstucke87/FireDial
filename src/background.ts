@@ -76,6 +76,7 @@ async function revealSpark({ viewId, sparkId }: Reveal, tab: browser.tabs.Tab | 
 }
 
 browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (sender.id !== browser.runtime.id) return
   const reveal = RevealMessage.safeParse(message)
   if (reveal.success) void revealSpark(reveal.data, sender.tab)
 })
@@ -193,7 +194,12 @@ async function syncCommand(command: SyncCommand): Promise<void> {
   }
 }
 
-browser.runtime.onMessage.addListener((message: unknown) => {
+// Sync commands come only from FireDial's own pages, never from the scripts it puts into web pages.
+const fromFireDial = (sender: browser.runtime.MessageSender): boolean =>
+  sender.id === browser.runtime.id && Boolean(sender.url?.startsWith(browser.runtime.getURL('')))
+
+browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  if (!fromFireDial(sender)) return
   const command = SyncMessage.safeParse(message)
   if (command.success) void syncCommand(command.data.sync)
 })

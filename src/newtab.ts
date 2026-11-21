@@ -196,7 +196,8 @@ const notify = (text: string): void => {
 // Opening sparks
 
 // Browsers don't let extensions open file:, about: and chrome: URLs, so those sparks copy their URL.
-const isBlocked = (url: string): boolean => /^(file|about|chrome):/i.test(url)
+// Script and inline-document URLs (javascript:, data:, …) are never run from FireDial's page: copied too.
+const isBlocked = (url: string): boolean => /^\s*(file|about|chrome|javascript|vbscript|data|blob):/i.test(url)
 
 async function copyBlocked(url: string): Promise<void> {
   await navigator.clipboard.writeText(url)
