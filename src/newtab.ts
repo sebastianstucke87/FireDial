@@ -1,13 +1,13 @@
 // FireDial new tab page.
 
-import { BROWSER_NAME, IS_CHROME, searchEngines, searchWeb } from './browser.ts'
+import { ALL_SITES, BROWSER_NAME, IS_CHROME, searchEngines, searchWeb } from './browser.ts'
 
 import { backupName, exportParts, importSummary, readBackup } from './backup.ts'
 import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
-import { originOfKey, SiteIcons } from './icons.ts'
+import { addIcons, originOf, originOfKey, readIcons, SiteIcons, sitesOf } from './icons.ts'
 import { blobToDataUrl, faviconPath, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
@@ -1239,7 +1239,8 @@ const importDone = html('#importDone')
 // Resolves once the file is saved.
 async function writeBackup(auto: boolean): Promise<{ name: string; blob: Blob }> {
   const ids = store.doc.sparks.map((spark) => spark.thumb).filter((thumb) => thumb !== null)
-  const blob = new Blob(exportParts(store.doc, await store.thumbs(ids)), { type: 'application/json' })
+  const icons = await readIcons(browserKeyValue, sitesOf(store.doc.sparks.map((spark) => spark.url)))
+  const blob = new Blob(exportParts(store.doc, await store.thumbs(ids), icons), { type: 'application/json' })
   if (blob.size > LIMITS.backupBytes) throw new LimitError('The backup would be larger than 1 GB')
   const name = backupName(new Date(), auto)
   const url = URL.createObjectURL(blob)
@@ -1319,6 +1320,7 @@ async function importFile(file: File): Promise<string> {
   }
   showImport('Saving')
   await replaceData({ ...backup, sparks })
+  await addIcons(browserKeyValue, backup.icons)
   return importSummary(backup.views.filter((view) => view.kind === 'normal').length, sparks.length, backup.skipped)
 }
 
@@ -1356,8 +1358,12 @@ async function runImport(file: File): Promise<void> {
   importDone.hidden = true
   const closed = importModal.open()
   try {
-    endImport('Import complete', await importFile(file), 'Done')
+    const summary = await importFile(file)
+    const ask = !(await browser.permissions.contains(ALL_SITES).catch(() => false))
+    importDone.dataset['ask'] = ask ? 'sites' : ''
+    endImport('Import complete', ask ? `${summary}. New sites need site access for their icons.` : summary, ask ? 'Allow site access' : 'Done')
   } catch (error) {
+    importDone.dataset['ask'] = ''
     endImport('Import failed', errorText(error), 'Close')
   }
   await afterChange() // behind the result, so it's there to see before Done
@@ -1365,6 +1371,13 @@ async function runImport(file: File): Promise<void> {
 }
 
 const importInput = $('#importFile', HTMLInputElement)
+
+// After an import, Done asks for the site access this browser lacks: the click itself has to.
+importDone.addEventListener('click', () => {
+  if (importDone.dataset['ask'] !== 'sites') return
+  importDone.dataset['ask'] = ''
+  void askIconAccess()
+})
 
 // Asks first, then picks the file: the click on the answer still counts as the user's for the picker.
 async function askImport(): Promise<void> {
@@ -1639,7 +1652,7 @@ async function setDraftImage(file: File | undefined): Promise<void> {
 }
 
 // A new preview of the page in the URL field. Access to all sites (what a capture needs) is asked
-// for by the click itself and kept until the browser closes; saved with the spark like any other preview.
+// for by the click itself, and kept; saved with the spark like any other preview.
 async function refreshDraft(): Promise<void> {
   const url = normalizeUrl(urlField.value)
   if (!originOf(url)) return
@@ -2085,6 +2098,7 @@ const actions: Readonly<Record<string, (event: Event) => void>> = {
   },
   'ask-delete-everything': () => void askFromAbout(acrossBrowsers(DELETE_EVERYTHING), deleteEverything),
   'ask-reset-settings': () => void askFromAbout(RESET_SETTINGS, resetSettings),
+  'allow-sites': () => void askIconAccess().then(showSiteAccess),
   'ask-start-over': () => void askFromAbout(acrossBrowsers(START_OVER), startOver),
   reload: () => {
     location.reload()
@@ -2249,17 +2263,26 @@ document.addEventListener('focusout', () => {
 function openAbout(): void {
   html('#aboutVersion').textContent = `FireDial ${browser.runtime.getManifest().version}`
   html('#browserName').textContent = BROWSER_NAME
+  void showSiteAccess()
   void aboutModal.open()
 }
+
+// In words, not colours: whether FireDial may reach the sites, for their icons and previews.
+async function showSiteAccess(): Promise<void> {
+  const allowed = await browser.permissions.contains(ALL_SITES).catch(() => false)
+  html('#siteAccess').textContent = `Site access: ${allowed ? 'allowed' : 'not allowed'}`
+  $('#allowSites', HTMLButtonElement).disabled = allowed
+}
+browser.permissions.onAdded.addListener(() => void showSiteAccess())
+browser.permissions.onRemoved.addListener(() => void showSiteAccess())
 
 const aboutModal = new Modal($('#aboutModal', HTMLDialogElement), 'FireDial')
 const confirm = new Confirm()
 
 // The browser's bookmarks, once: read only, into labels and views; then each site's icon, which is
-// what the access to all sites is for. It lasts until the browser closes.
+// what the access to all sites is for. It is kept once given.
 
 const ICON_SIZE = 96 // px at most: under SMALL_IMAGE, so it shows as an icon
-const ALL_SITES = { origins: ['<all_urls>'] }
 
 // Access to all sites is asked for only with something to import, by the Import button itself.
 async function importBookmarks(): Promise<void> {
@@ -2299,15 +2322,6 @@ async function importBookmarks(): Promise<void> {
     store.doc.sparks.filter((spark) => added.has(spark.id)),
     'all'
   )
-}
-
-function originOf(url: string): string | null {
-  try {
-    const { origin, protocol } = new URL(url)
-    return /^https?:$/.test(protocol) ? origin : null
-  } catch {
-    return null
-  }
 }
 
 // An answer as a small PNG, if it's an image at all. Through an <img>, which reads ICO and SVG too.
@@ -2413,6 +2427,8 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
   } finally {
     for (const origin of due) lookingFor.delete(origin)
     iconCard.hidden = true
+    // Icons found go to Drive too, so other browsers have them.
+    if (found.size && isSyncing()) void browser.runtime.sendMessage({ sync: 'now' }).catch(() => undefined)
   }
 }
 
@@ -2493,7 +2509,7 @@ function tabLoaded(tabId: number, signal: AbortSignal): Promise<void> {
 
 const NOTE_TIME = 800 // ms the note on a captured page stays before its tab closes
 
-// Needs access to all sites, which the caller asks for (kept until the browser closes). Closing the page's tab
+// Needs access to all sites, which the caller asks for (kept once given). Closing the page's tab
 // cancels the whole refresh, like the card's Cancel.
 // Firefox captures a tab in the background, so FireDial and its card stay in front. Chrome only
 // captures the tab in front: the page shows, and note (if any) appears on it once it's captured.

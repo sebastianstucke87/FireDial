@@ -813,3 +813,22 @@ test('previews still in use stay on Drive', async () => {
   await a.sync.run(false)
   assert.equal(drive.names().filter((name) => name.startsWith('thumb-')).length, 1)
 })
+
+test('icons sync: one browser’s icons reach another, and icons found there come back', async () => {
+  const drive = new FakeDrive()
+  const icon = 'data:image/png;base64,AAAA'
+  const a = await browserWith(drive)
+  await add(a.store, 'a')
+  await add(a.store, 'b')
+  await a.kv.set({ 'icon:https://a.example': { src: icon, at: 1 } })
+  await a.sync.start('Firefox on Windows')
+  assert.ok(drive.names().includes('icons.json'))
+  const b = await browserWith(drive)
+  await b.sync.start('Chrome on Windows')
+  assert.deepEqual(b.kv.data.get('icon:https://a.example'), { src: icon, at: 1000 })
+  await b.kv.set({ 'icon:https://b.example': { src: icon, at: 1 } })
+  await b.sync.run(true)
+  await a.sync.run(true)
+  assert.deepEqual(a.kv.data.get('icon:https://b.example'), { src: icon, at: 1000 })
+  assert.deepEqual(a.kv.data.get('icon:https://a.example'), { src: icon, at: 1 }) // its own stays
+})

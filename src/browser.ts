@@ -24,6 +24,9 @@ export function adapt<T extends Api>(scope: Scope<T>): boolean {
 }
 
 export const IS_CHROME = adapt(globalThis)
+
+// Access to all sites: for icons, previews and images from the web. Kept once given.
+export const ALL_SITES = { origins: ['<all_urls>'] }
 export const BROWSER_NAME = IS_CHROME ? 'Chrome' : 'Firefox'
 
 interface SearchApi {

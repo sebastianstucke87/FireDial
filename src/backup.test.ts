@@ -169,3 +169,19 @@ test('an imported preview that is no image is left out', () => {
     ['', '']
   )
 })
+
+const withIcons = (icons: unknown): unknown => ({ format: 'firedial', views: [], sparks: [{ id: 0, title: 'a', url: 'https://a.example/' }], icons })
+
+test('icons go into a backup and come back: images only, small ones, of the sparks’ sites', () => {
+  const icon = 'data:image/png;base64,AAAA'
+  const icons = new Map([
+    ['https://a.example', icon],
+    ['https://elsewhere.example', icon]
+  ])
+  const parsed = parseBackup(JSON.parse(exportParts(sampleDoc(), new Map(), icons).join('')))
+  assert.deepEqual([...parsed.icons], [['https://a.example', icon]])
+  const odd = { 'https://a.example': 'javascript:alert(1)' }
+  assert.equal(parseBackup(withIcons(odd)).icons.size, 0)
+  const large = { 'https://a.example': `data:image/png;base64,${'A'.repeat(70_000)}` }
+  assert.equal(parseBackup(withIcons(large)).icons.size, 0)
+})

@@ -444,7 +444,7 @@ test('About ends with the version, the address and the licenses, and warns in th
     await js(
       "return [...document.querySelectorAll('#aboutModal .Section__head')].map((head) => `${head.textContent} ${head.querySelector('use').getAttribute('href')}`)"
     ),
-    ['Hotkeys #i-keyboard', 'Hotkeys in Edit #i-edit', 'Import #i-archive', 'Sync #i-sync', 'Resets #i-undo']
+    ['Hotkeys #i-keyboard', 'Hotkeys in Edit #i-edit', 'Import #i-archive', 'Sync #i-sync', 'Permissions #i-globe', 'Resets #i-undo']
   )
   assert.ok(await js("return document.querySelector('#aboutModal .Divider').nextElementSibling.matches('.Modal__foot')"))
   await press(Key.ESCAPE)
@@ -690,8 +690,9 @@ test('Import saves a backup first, sums up over the result already shown, and le
   const file = saved().find((name) => !before.includes(name))
   assert.match(file ?? '', /^firedial_\d{4}-\d{2}-\d{2}_\d{6}_autobackup\.json$/)
   assert.deepEqual(await openDialogs(), ['Import complete'])
-  assert.equal(await text('#importDetail'), 'Imported 2 views with 3 sparks')
-  assert.equal(await text('#importDone'), 'Done')
+  // Without access to the sites, Done asks for it: new sites' icons need it.
+  assert.equal(await text('#importDetail'), 'Imported 2 views with 3 sparks. New sites need site access for their icons.')
+  assert.equal(await text('#importDone'), 'Allow site access')
   const colors = await js<string[]>(`
     const modal = document.querySelector('#importModal')
     return [getComputedStyle(modal.querySelector('.Modal__title .icon')).color, getComputedStyle(modal.querySelector('#importDone')).borderTopColor]`)

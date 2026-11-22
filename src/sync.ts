@@ -1,6 +1,7 @@
 // Sync through the user's Google Drive: every browser signed in to the same account has the same
 // FireDial. Drive holds state.json (the doc and a version that counts up with each change) and
-// one file per image, named by its id: images never change, so only missing ones move.
+// one file per image, named by its id: images never change, so only missing ones move. The sites'
+// icons go together in icons.json, read again only when another browser changed it.
 //
 // Each browser keeps the doc as it last synced it (the base). A change here is pushed when the
 // version on Drive is still the one the base came from; otherwise the newer doc is pulled first
@@ -13,6 +14,7 @@ import { backupName, exportParts } from './backup.ts'
 import type { Drive, DriveFile } from './drive.ts'
 import { OfflineError, SignInError } from './drive.ts'
 import { applySide, diff } from './history.ts'
+import { addIcons, iconsFrom, readIcons, sitesOf } from './icons.ts'
 import { isStoredImage } from './images.ts'
 import type { Step } from './history.ts'
 import { LimitError, LIMITS, SparkId, ViewId } from './model.ts'
@@ -22,6 +24,7 @@ import type { KeyValue, Store } from './store.ts'
 
 const STATE_FILE = 'state.json'
 const THUMB_PREFIX = 'thumb-'
+const ICONS_FILE = 'icons.json'
 const ROUNDS = 5 // pull-then-push rounds before giving up until the next change
 const SHOWN_FROM = 10 // previews moving at once before the page shows how far it is
 // Drive requests at once: each image waits about a second for Google, not for the line. Reads can
@@ -70,6 +73,7 @@ interface Remote {
   version: number
   stamp: Stamp
   doc: Doc
+  files: readonly DriveFile[] // all on Drive, as listed with it
 }
 
 const content = (doc: Doc): string => JSON.stringify({ views: doc.views, sparks: doc.sparks, prefs: doc.prefs })
@@ -142,8 +146,13 @@ const becomes =
 // Saves a backup file where the user finds it: the FireDial folder in their Drive.
 export type Keep = (name: string, content: Blob) => Promise<void>
 
-const backupBlob = (doc: Doc, images: ReadonlyMap<ThumbId, string>): Blob => {
-  const blob = new Blob(exportParts(doc, images), { type: 'application/json' })
+// What icons.json held when this browser last read or wrote it: its stamp, and which sites.
+const IconsSeen = z.object({ stamp: z.catch(z.string(), ''), sites: z.catch(z.array(z.string()), []) })
+
+const sitesOfDoc = (doc: Doc): Set<string> => sitesOf(doc.sparks.map((spark) => spark.url))
+
+const backupBlob = (doc: Doc, images: ReadonlyMap<ThumbId, string>, icons: ReadonlyMap<string, string>): Blob => {
+  const blob = new Blob(exportParts(doc, images, icons), { type: 'application/json' })
   if (blob.size > LIMITS.backupBytes) throw new LimitError('The backup would be larger than 1 GB')
   return blob
 }
@@ -199,7 +208,7 @@ export class Sync {
   // Turns sync on. Drive empty: this browser's sparks go up. Sparks on both sides: the user picks.
   start(device: string): Promise<void> {
     return this.serial(async () => {
-      await this.kv.remove('syncBase')
+      await this.kv.remove(['syncBase', 'syncIcons'])
       await this.kv.set({ sync: { ...parseSyncState({}), on: true, status: 'syncing', device } })
       await this.update({ email: await this.drive.email() })
       const remote = await this.fetchRemote(await this.drive.list())
@@ -228,7 +237,7 @@ export class Sync {
         if (replaced) await this.keep(backupName(new Date(this.now()), true), replaced)
       } catch (error) {
         console.warn('FireDial sync: no backup, so not started', error)
-        await this.kv.remove('syncBase')
+        await this.kv.remove(['syncBase', 'syncIcons'])
         await this.kv.set({ sync: { ...parseSyncState({}), problem: 'Sync not started: the backup failed' } })
         return
       }
@@ -242,7 +251,7 @@ export class Sync {
   private async localBackup(): Promise<Blob> {
     await this.store.load()
     const doc = this.store.doc
-    return backupBlob(doc, await this.store.thumbs([...thumbsOf(doc)]))
+    return backupBlob(doc, await this.store.thumbs([...thumbsOf(doc)]), await readIcons(this.kv, sitesOfDoc(doc)))
   }
 
   // Drive's doc with its previews, as a backup file.
@@ -255,7 +264,8 @@ export class Sync {
       const src = file ? await this.drive.read(file) : ''
       if (isStoredImage(src)) images.set(id, src)
     })
-    return backupBlob(doc, images)
+    const icons = byName.get(ICONS_FILE)
+    return backupBlob(doc, images, icons ? await this.iconsOnDrive(icons, sitesOfDoc(doc)) : new Map())
   }
 
   // Sends changes made here; with pull, also checks Drive for newer ones.
@@ -268,7 +278,7 @@ export class Sync {
 
   stop(): Promise<void> {
     return this.serial(async () => {
-      await this.kv.remove('syncBase')
+      await this.kv.remove(['syncBase', 'syncIcons'])
       await this.kv.set({ sync: parseSyncState({}) })
     })
   }
@@ -287,7 +297,7 @@ export class Sync {
       } finally {
         await this.kv.remove('syncProgress')
       }
-      await this.kv.remove('syncBase')
+      await this.kv.remove(['syncBase', 'syncIcons'])
       await this.kv.set({ sync: parseSyncState({}) })
     })
   }
@@ -296,7 +306,7 @@ export class Sync {
     const file = files.find((each) => each.name === STATE_FILE)
     if (!file) return null
     const data = RemoteSchema.parse(JSON.parse(await this.drive.read(file.id)))
-    return { file, version: data.version, stamp: { device: data.device, at: data.savedAt }, doc: parseDoc(data.doc) }
+    return { file, version: data.version, stamp: { device: data.device, at: data.savedAt }, doc: parseDoc(data.doc), files }
   }
 
   // The Drive doc becomes this browser's, as it is.
@@ -309,7 +319,44 @@ export class Sync {
 
   private async synced(remote: Remote): Promise<void> {
     await this.kv.set({ syncBase: docItems(remote.doc) })
+    await this.syncIcons(remote.doc, remote.files)
     await this.update({ status: 'ok', version: remote.version, last: remote.stamp, lastPull: this.now() })
+  }
+
+  private async iconsOnDrive(file: string, sites: ReadonlySet<string>): Promise<Map<string, string>> {
+    try {
+      return iconsFrom(JSON.parse(await this.drive.read(file)), sites)
+    } catch (error) {
+      if (error instanceof SyntaxError) return new Map() // not JSON: as if there were none
+      throw error
+    }
+  }
+
+  // Icons both ways: the ones another browser found come here, the ones found here go to Drive.
+  // Two browsers writing at once may drop one's icons: it finds them missing and writes again.
+  private async syncIcons(doc: Doc, listed?: readonly DriveFile[]): Promise<void> {
+    const sites = sitesOfDoc(doc)
+    const file = (listed ?? (await this.drive.list())).find((each) => each.name === ICONS_FILE)
+    const stamp = file?.props['stamp'] ?? ''
+    const { syncIcons } = await this.kv.get('syncIcons')
+    let seen = IconsSeen.parse(syncIcons ?? {})
+    let onDrive: Map<string, string> | null = null
+    if (file && stamp !== seen.stamp) {
+      onDrive = await this.iconsOnDrive(file.id, sites)
+      await addIcons(this.kv, onDrive, this.now())
+      seen = { stamp, sites: [...onDrive.keys()] }
+      await this.kv.set({ syncIcons: seen })
+    }
+    const here = await readIcons(this.kv, sites)
+    const known = new Set(stamp === seen.stamp ? seen.sites : [])
+    if (![...here.keys()].some((site) => !known.has(site))) return
+    onDrive ??= file ? await this.iconsOnDrive(file.id, sites) : new Map<string, string>()
+    const icons = new Map([...onDrive, ...here])
+    const next = { stamp: crypto.randomUUID(), sites: [...icons.keys()] }
+    const body = JSON.stringify(Object.fromEntries(icons))
+    if (file) await this.drive.update(file.id, body, { stamp: next.stamp })
+    else await this.drive.create(ICONS_FILE, body, { stamp: next.stamp })
+    await this.kv.set({ syncIcons: next })
   }
 
   // Previews to or from Drive. Many of them take a while (the first sync): FireDial pages show how
@@ -369,7 +416,10 @@ export class Sync {
         pull = false // what's left is pushing what was made again on top
         continue
       }
-      if (!changed) return this.update({ status: 'ok', lastPull: this.now() })
+      if (!changed) {
+        await this.syncIcons(local, files)
+        return this.update({ status: 'ok', lastPull: this.now() })
+      }
       return this.push(local, files, state)
     }
   }
@@ -394,6 +444,7 @@ export class Sync {
     if (file) await this.drive.update(file, body, props)
     else await this.drive.create(STATE_FILE, body, props)
     await this.kv.set({ syncBase: docItems(local) })
+    await this.syncIcons(local, files)
     await this.update({ status: 'ok', version, last: stamp, lastPull: this.now() })
     // Images no doc on Drive refers to any more.
     const keep = new Set([...wanted].map(thumbName))
