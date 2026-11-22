@@ -137,6 +137,19 @@ const shortcuts: Record<string, () => Promise<void>> = {
     const element = await tile(4)
     await expectNewTab(() => driver.actions().move({ origin: element }).press(Button.MIDDLE).release(Button.MIDDLE).perform(), 4)
   },
+  'Middle click on a view': async () => {
+    const [current, ...others] = await driver.getAllWindowHandles()
+    assert.ok(current)
+    assert.equal(others.length, 0)
+    const view = await driver.findElement(By.css('.Group'))
+    await driver.actions().move({ origin: view }).press(Button.MIDDLE).release(Button.MIDDLE).perform()
+    await until('a tab per spark', async () => (await driver.getAllWindowHandles()).length === SPARKS + 1)
+    for (const handle of (await driver.getAllWindowHandles()).filter((handle) => handle !== current)) {
+      await driver.switchTo().window(handle)
+      await driver.close()
+    }
+    await driver.switchTo().window(current)
+  },
   'Ctrl A': async () => {
     await js('document.activeElement.blur()')
     await chord(Key.CONTROL, 'a')
