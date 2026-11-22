@@ -6,7 +6,7 @@
 // page only with the click, so it's always enabled and the click finds out.
 // Also keeps the native bookmarks in sync with the store.
 
-import { IS_CHROME } from './browser.ts'
+import { ALL_SITES, IS_CHROME } from './browser.ts'
 
 import * as z from 'zod/mini'
 
@@ -233,11 +233,12 @@ browser.bookmarks.onRemoved.addListener(() => {
 browser.runtime.onInstalled.addListener(rebuildMenu)
 browser.runtime.onStartup.addListener(rebuildMenu)
 
-// Access to sites, asked for by Refresh preview, the bookmark import or an image from a web page,
-// lasts until the browser closes: given back when it starts again.
+// Access to all sites is kept once given: icons and previews need it in every session. Access to
+// a single site, asked for by an image from a web page, lasts until the browser closes.
 async function dropSiteAccess(): Promise<void> {
   const { origins = [] } = await browser.permissions.getAll()
-  if (origins.length) await browser.permissions.remove({ origins }).catch(() => false)
+  const single = origins.filter((origin) => !ALL_SITES.origins.includes(origin) && origin !== '*://*/*')
+  if (single.length) await browser.permissions.remove({ origins: single }).catch(() => false)
 }
 browser.runtime.onStartup.addListener(() => void dropSiteAccess())
 rebuildMenu()
