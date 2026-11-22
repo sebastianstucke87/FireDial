@@ -2172,9 +2172,22 @@ document.addEventListener('click', (event) => {
   if (view && !bandDrawn && !closest(event, '.NameInput')) setActive(view.id)
 })
 
+// A middle click on a view opens all its sparks, like a middle click on a spark opens that one.
+document.addEventListener('mousedown', (event) => {
+  if (event.button === 1 && closest(event, '.Group')) event.preventDefault() // no autoscroll
+})
+
 document.addEventListener('auxclick', (event) => {
+  if (event.button !== 1) return
+  const viewEl = closest(event, '.Group')
+  if (viewEl) {
+    event.preventDefault()
+    const view = viewById(viewIdOf(viewEl))
+    if (view && !closest(event, '.NameInput')) void openAll(view)
+    return
+  }
   const tile = closest(event, '#sparks .Spark[data-id]')
-  if (event.button !== 1 || !tile) return
+  if (!tile) return
   const url = sparkById(sparkIdOf(tile))?.url ?? ''
   if (editing || isBlocked(url)) event.preventDefault()
   if (!editing && isBlocked(url)) void copyBlocked(url)
