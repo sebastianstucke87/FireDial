@@ -78,6 +78,11 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
+          # Test code never ships in the add-on; its local test servers and mocks only raise noise.
+          config: |
+            paths-ignore:
+              - e2e/**
+              - '**/*.test.ts'
       - uses: github/codeql-action/analyze@v4.39.3
         with:
           category: /language:${{ matrix.language }}
