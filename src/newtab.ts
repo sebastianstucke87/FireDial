@@ -2425,10 +2425,10 @@ async function keepIcons(found: ReadonlyMap<string, string>): Promise<void> {
   await renderSparks()
 }
 
-// Firefox keeps no icons for add-ons: they come from the sites, which takes access to them. Asked
-// for by the click that makes sparks show icons; Chrome has its own copies of the sites visited.
+// Icons the browser has no copy of come from the sites, which takes access to them. Asked for by the
+// click that makes sparks show icons; once granted, the browser asks no more.
 function askIconAccess(): Promise<boolean> {
-  return IS_CHROME ? Promise.resolve(false) : browser.permissions.request(ALL_SITES).catch(() => false)
+  return browser.permissions.request(ALL_SITES).catch(() => false)
 }
 // Sites the browser keeps closed to add-ons, site access or not: asking them only gets an error.
 const CLOSED_SITES = new Set(IS_CHROME ? ['https://chrome.google.com', 'https://chromewebstore.google.com'] : [])
