@@ -15,7 +15,6 @@ export const firefoxBookmarks: BookmarkTree = {
 }
 
 export const firefox: Browser = {
-  name: 'Firefox',
   product: 'Firefox',
   menuContexts: ['all', 'tab'],
   bookmarks: firefoxBookmarks,

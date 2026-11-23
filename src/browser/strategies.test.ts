@@ -113,7 +113,6 @@ test('menus, closed sites and the page API differ by browser', () => {
   assert.equal(firefox.pageApi, 'browser')
   assert.equal(chrome.pageApi, 'chrome')
   assert.equal(chromeFor('Brave').product, 'Brave')
-  assert.equal(chromeFor('Brave').name, 'Chrome')
 })
 
 test('a refused or failed question: Firefox starts no sync, Chrome starts it anyway', async () => {
@@ -135,8 +134,7 @@ test('steps a browser skips still answer as promises', () => {
   }
 })
 
-test('names: Firefox is Firefox; a Chromium browser is Chrome in texts, its own name for its device', () => {
-  assert.equal(firefox.name, 'Firefox')
+test('the browser as the user knows it, for its device name', () => {
   assert.equal(firefox.product, 'Firefox')
 })
 
@@ -150,8 +148,7 @@ test("Edge's icon copies come without a type: they're PNGs", async () => {
   take()
 })
 
-test('Edge is Chrome but for its name and its closed store', () => {
-  assert.equal(edge.name, 'Edge')
+test('Edge is Chrome but for its product name and its closed store', () => {
   assert.equal(edge.product, 'Edge')
   assert.deepEqual([...edge.closedSites], ['https://microsoftedge.microsoft.com'])
   assert.equal(edge.previewInFront, true)

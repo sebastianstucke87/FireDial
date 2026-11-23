@@ -15,7 +15,7 @@ import * as z from 'zod/mini'
 import { startChromium, until as untilIn } from './chromium.ts'
 import type { Chromium } from './chromium.ts'
 
-// name: as FireDial calls the browser, e.g. "Chrome bookmarks".
+// name: the browser as the test titles call it.
 export function chromiumTests(browser: Chromium, name: string): void {
   // Every site's page, and its icon: a red square.
   const ICON = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGO4o6ZGEmIY1TCqQW3YagAAE6ooEEB2dq0AAAAASUVORK5CYII=', 'base64')
@@ -133,12 +133,12 @@ export function chromiumTests(browser: Chromium, name: string): void {
     assert.equal(await exists('no-such-entry'), false)
   })
 
-  test(`About shows the version and offers ${name} bookmarks`, async () => {
+  test('About shows the version and offers the browser bookmarks', async () => {
     await home()
     await click('#editToggle')
     await click('[data-action="about"]')
     assert.match(await js<string>("return document.querySelector('#aboutVersion').textContent"), /^FireDial 20\d\d\.\d{1,2}\.\d{1,2}\.\d{1,4}$/)
-    assert.equal(await js<string>('return document.querySelector(\'[data-action="import-bookmarks"]\').textContent'), `${name} bookmarks`)
+    assert.equal(await js<string>('return document.querySelector(\'[data-action="import-bookmarks"]\').textContent'), 'Browser bookmarks')
   })
 
   test(`Export saves the backup through ${name}`, async () => {

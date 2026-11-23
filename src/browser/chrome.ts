@@ -17,7 +17,6 @@ export const chromeBookmarks: BookmarkTree = {
 
 // Chrome and the browsers made from it. product is what the user knows it as ("Chrome", "Brave").
 export const chromeFor = (product: string): Browser => ({
-  name: 'Chrome',
   product,
   // Chrome has no menu on tabs.
   menuContexts: ['all'],
