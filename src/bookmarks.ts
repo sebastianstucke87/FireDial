@@ -13,9 +13,9 @@ import * as z from 'zod/mini'
 
 import { allocSpark, canonicalize, labelKey, listOf, makeView, SparkId, toLabel, toLabelNames, toSparkUrl, View, ViewId } from './model.ts'
 import type { Doc, LabelName, Spark } from './model.ts'
+import type { BookmarkTree } from './browser/index.ts'
 import type { KeyValue, Store } from './store.ts'
 
-const FIREFOX_OTHER = 'unfiled_____' // Firefox's Other Bookmarks
 const ROOT_TITLE = 'FireDial'
 const SAVE_EVERY = 50 // bookmark writes between saving the map, so a crash can't orphan many
 const PULL_DELAY = 300 // ms: Firefox Sync and bulk edits fire many events in a row
@@ -23,9 +23,9 @@ const PULL_DELAY = 300 // ms: Firefox Sync and bulk edits fire many events in a 
 export interface TreeNode {
   id: string
   title: string
-  type?: string | undefined // Firefox only
-  folderType?: string | undefined // Chrome only
-  syncing?: boolean | undefined // Chrome only
+  type?: string | undefined
+  folderType?: string | undefined
+  syncing?: boolean | undefined
   url?: string | null | undefined
   children?: TreeNode[] | undefined
 }
@@ -71,14 +71,11 @@ const LABEL_DATA_TITLE = 'FireDial labels'
 const VIEW_DATA_TITLE = 'FireDial views'
 const DATA_CHUNK = 60_000 // characters of JSON in one address
 
-// Firefox tells folders, bookmarks and separators by type; Chrome has no type and no separators.
-export const isFolder = (node: Pick<TreeNode, 'type' | 'url'>): boolean => node.type === 'folder' || (node.type === undefined && node.url == null)
-export const isBookmark = (node: Pick<TreeNode, 'type' | 'url'>): boolean =>
-  node.type === 'bookmark' || (node.type === undefined && typeof node.url === 'string')
-const isData = (node: TreeNode): boolean => isBookmark(node) && (node.url ?? '').startsWith(DATA)
-const isSpark = (node: TreeNode): boolean => isBookmark(node) && !isData(node)
-const childBookmarks = (node: TreeNode): TreeNode[] => (node.children ?? []).filter(isSpark)
-const dataOf = (root: TreeNode, prefix: string): TreeNode[] => (root.children ?? []).filter((node) => isData(node) && (node.url ?? '').startsWith(prefix))
+const isData = (tree: BookmarkTree, node: TreeNode): boolean => tree.isBookmark(node) && (node.url ?? '').startsWith(DATA)
+const isSpark = (tree: BookmarkTree, node: TreeNode): boolean => tree.isBookmark(node) && !isData(tree, node)
+const childBookmarks = (tree: BookmarkTree, node: TreeNode): TreeNode[] => (node.children ?? []).filter((child) => isSpark(tree, child))
+const dataOf = (tree: BookmarkTree, root: TreeNode, prefix: string): TreeNode[] =>
+  (root.children ?? []).filter((node) => isData(tree, node) && (node.url ?? '').startsWith(prefix))
 
 // The addresses that hold this value: part/parts#JSON, in order.
 function dataUrls(prefix: string, value: unknown): string[] {
@@ -179,14 +176,14 @@ function applyViews(doc: Doc, synced: readonly SyncedView[], sparkIds: ReadonlyM
 
 // Pull: the doc takes over the folder. New bookmarks become sparks, what's gone from the folder
 // goes from the doc, and the order of the bookmarks is All's order. Sparks a push couldn't map stay.
-function applyTree(doc: Doc, root: TreeNode, map: BookmarkMap): void {
+function applyTree(doc: Doc, root: TreeNode, map: BookmarkMap, tree: BookmarkTree): void {
   const sparkIds = reversed(map.sparks)
   const sparks = new Map(doc.sparks.map((spark) => [spark.id, spark]))
   const seen = new Set<SparkId>()
   const position = new Map<number, number>()
-  const labels = readLabelData(dataOf(root, LABEL_DATA))
+  const labels = readLabelData(dataOf(tree, root, LABEL_DATA))
 
-  for (const node of childBookmarks(root)) {
+  for (const node of childBookmarks(tree, root)) {
     const known = sparkIds.get(node.id)
     const spark = known === undefined ? undefined : sparks.get(known)
     const url = toSparkUrl(node.url ?? '')
@@ -209,7 +206,7 @@ function applyTree(doc: Doc, root: TreeNode, map: BookmarkMap): void {
     doc.sparks.filter((spark) => seen.has(spark.id) || !mapped.has(spark.id)),
     position
   )
-  const views = readViewData(dataOf(root, VIEW_DATA))
+  const views = readViewData(dataOf(tree, root, VIEW_DATA))
   if (views) applyViews(doc, views, reversed(map.sparks))
   canonicalize(doc)
 }
@@ -222,33 +219,29 @@ async function fetchRoot(api: BookmarkApi, id: string): Promise<TreeNode | null>
   }
 }
 
-// Other Bookmarks, where FireDial's folder goes. Chrome marks it with a folder type; signed in, it
-// has two, and the one that syncs to the account wins over the one on this device only.
-export const isOtherBookmarks = (node: TreeNode): boolean => node.id === FIREFOX_OTHER || node.folderType === 'other'
-
-async function otherBookmarks(api: BookmarkApi): Promise<string> {
-  const [tree] = await api.getTree()
-  const others = (tree?.children ?? []).filter(isOtherBookmarks)
-  const other = others.find((node) => node.syncing === true) ?? others[0]
+// Other Bookmarks, where FireDial's folder goes.
+async function otherBookmarks(api: BookmarkApi, tree: BookmarkTree): Promise<string> {
+  const [top] = await api.getTree()
+  const other = tree.otherBookmarks(top?.children ?? [])
   if (!other) throw new Error('No Other Bookmarks')
   return other.id
 }
 
-const findFolder = async (api: BookmarkApi, parent: string): Promise<TreeNode | undefined> =>
-  (await api.getChildren(parent)).find((node) => isFolder(node) && node.title === ROOT_TITLE)
+const findFolder = async (api: BookmarkApi, tree: BookmarkTree, parent: string): Promise<TreeNode | undefined> =>
+  (await api.getChildren(parent)).find((node) => tree.isFolder(node) && node.title === ROOT_TITLE)
 
 // FireDial's folder is in the bookmarks already, e.g. brought by browser sync from another device.
-export async function hasBookmarkFolder(api: BookmarkApi): Promise<boolean> {
-  return (await findFolder(api, await otherBookmarks(api))) !== undefined
+export async function hasBookmarkFolder(api: BookmarkApi, tree: BookmarkTree): Promise<boolean> {
+  return (await findFolder(api, tree, await otherBookmarks(api, tree))) !== undefined
 }
 
 // The root folder. It comes back if it's gone: deleting it must not wipe FireDial.
-async function ensureRoot(api: BookmarkApi, map: BookmarkMap): Promise<TreeNode> {
+async function ensureRoot(api: BookmarkApi, tree: BookmarkTree, map: BookmarkMap): Promise<TreeNode> {
   const current = map.root === null ? null : await fetchRoot(api, map.root)
   if (current) return current
   map.sparks.clear()
-  const parent = await otherBookmarks(api)
-  const id = (await findFolder(api, parent))?.id ?? (await api.create({ parentId: parent, title: ROOT_TITLE })).id
+  const parent = await otherBookmarks(api, tree)
+  const id = (await findFolder(api, tree, parent))?.id ?? (await api.create({ parentId: parent, title: ROOT_TITLE })).id
   map.root = id
   const root = await fetchRoot(api, id)
   if (!root) throw new Error('Bookmark folder vanished')
@@ -257,12 +250,14 @@ async function ensureRoot(api: BookmarkApi, map: BookmarkMap): Promise<TreeNode>
 
 class Pusher {
   private readonly api: BookmarkApi
+  private readonly tree: BookmarkTree
   private readonly map: BookmarkMap
   private readonly save: () => Promise<void>
   private writes = 0
 
-  constructor(api: BookmarkApi, map: BookmarkMap, save: () => Promise<void>) {
+  constructor(api: BookmarkApi, tree: BookmarkTree, map: BookmarkMap, save: () => Promise<void>) {
     this.api = api
+    this.tree = tree
     this.map = map
     this.save = save
   }
@@ -281,7 +276,7 @@ class Pusher {
 
   private async removeStale(doc: Doc, root: TreeNode): Promise<void> {
     const sparkIds = new Set(doc.sparks.map((spark) => spark.id))
-    const present = new Set(childBookmarks(root).map((node) => node.id))
+    const present = new Set(childBookmarks(this.tree, root).map((node) => node.id))
     for (const [id, bookmarkId] of this.map.sparks) {
       if (sparkIds.has(id)) continue
       this.map.sparks.delete(id)
@@ -290,13 +285,13 @@ class Pusher {
   }
 
   private async pushSparks(doc: Doc, root: TreeNode): Promise<void> {
-    const bookmarks = new Map(childBookmarks(root).map((node) => [node.id, node]))
+    const bookmarks = new Map(childBookmarks(this.tree, root).map((node) => [node.id, node]))
     const taken = new Set(this.map.sparks.values())
     for (const spark of doc.sparks) {
       const mapped = this.map.sparks.get(spark.id)
       const existing = mapped === undefined ? undefined : bookmarks.get(mapped)
       // A bookmark nobody claims with this address: an interrupted first sync, or a reinstall.
-      const node = existing ?? childBookmarks(root).find((item) => sameUrl(item.url ?? '', spark.url) && !taken.has(item.id))
+      const node = existing ?? childBookmarks(this.tree, root).find((item) => sameUrl(item.url ?? '', spark.url) && !taken.has(item.id))
       if (!node) {
         const created = await this.attempt(() => this.api.create({ parentId: root.id, title: spark.title, url: spark.url }))
         if (created) this.map.sparks.set(spark.id, created.id)
@@ -338,8 +333,8 @@ class Pusher {
   // None at all while no spark ever had a label. A push speaks only for its own sparks: labels of
   // bookmarks it hasn't pulled yet, say on a device that just started syncing, stay as they are.
   private async pushLabels(doc: Doc, root: TreeNode): Promise<void> {
-    const nodes = dataOf(root, LABEL_DATA)
-    const present = new Set(childBookmarks(root).map((node) => node.id))
+    const nodes = dataOf(this.tree, root, LABEL_DATA)
+    const present = new Set(childBookmarks(this.tree, root).map((node) => node.id))
     const own = new Set(this.map.sparks.values())
     const labels: Record<string, LabelName[]> = {}
     for (const [id, kept] of readLabelData(nodes) ?? []) {
@@ -357,7 +352,7 @@ class Pusher {
 
   // A device that hasn't synced yet leaves views it finds alone: the pull after this push takes them.
   private async pushViews(doc: Doc, root: TreeNode, fresh: boolean): Promise<void> {
-    if (fresh && readViewData(dataOf(root, VIEW_DATA))) return
+    if (fresh && readViewData(dataOf(this.tree, root, VIEW_DATA))) return
     const views = doc.views.map(({ kind, title, sort, rule, order }) => ({
       kind,
       title,
@@ -365,13 +360,13 @@ class Pusher {
       rule,
       order: order.flatMap((id) => this.map.sparks.get(id) ?? [])
     }))
-    await this.writeData(root, dataOf(root, VIEW_DATA), viewDataUrls(views), VIEW_DATA_TITLE)
+    await this.writeData(root, dataOf(this.tree, root, VIEW_DATA), viewDataUrls(views), VIEW_DATA_TITLE)
   }
 
   async push(doc: Doc): Promise<void> {
     const fresh = this.map.root === null
-    await this.removeStale(doc, await ensureRoot(this.api, this.map))
-    const root = await ensureRoot(this.api, this.map) // what's left: nothing removed may be adopted
+    await this.removeStale(doc, await ensureRoot(this.api, this.tree, this.map))
+    const root = await ensureRoot(this.api, this.tree, this.map) // what's left: nothing removed may be adopted
     await this.pushSparks(doc, root)
     await this.arrange(doc, root.id)
     const now = await fetchRoot(this.api, root.id)
@@ -386,15 +381,17 @@ export class BookmarkSync {
   private readonly store: Store
   private readonly kv: KeyValue
   private readonly api: BookmarkApi
+  private readonly tree: BookmarkTree
   private running = false
   private wantPush = false
   private wantPull = false
   private pullTimer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(store: Store, kv: KeyValue, api: BookmarkApi) {
+  constructor(store: Store, kv: KeyValue, api: BookmarkApi, tree: BookmarkTree) {
     this.store = store
     this.kv = kv
     this.api = api
+    this.tree = tree
   }
 
   requestPush(): Promise<void> {
@@ -449,7 +446,7 @@ export class BookmarkSync {
     const { doc, revision } = this.store
     if (revision === syncedRev && map.root !== null) return
     const save = (): Promise<void> => this.kv.set({ bookmarkMap: serializeMap(map) })
-    await new Pusher(this.api, map, save).push(doc)
+    await new Pusher(this.api, this.tree, map, save).push(doc)
     await this.kv.set({ bookmarkMap: serializeMap(map), syncedRev: revision })
   }
 
@@ -470,7 +467,7 @@ export class BookmarkSync {
     }
     const applied = await this.store.commit(
       (doc) => {
-        applyTree(doc, root, map)
+        applyTree(doc, root, map, this.tree)
         return undefined
       },
       { unchecked: true, ifRevision: syncedRev }

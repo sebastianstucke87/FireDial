@@ -3,9 +3,9 @@
 
 import * as z from 'zod/mini'
 
-import { ALL_SITES, IS_CHROME } from '../browser.ts'
+import { currentBrowser } from '../browser/index.ts'
 import { GoogleDrive } from '../drive.ts'
-import { googleAuth, SYNC_DATA, signIn } from '../google.ts'
+import { googleAuth, signIn } from '../google.ts'
 import { plural } from '../model.ts'
 import { browserKeyValue } from '../store.ts'
 import { parseSyncState } from '../sync.ts'
@@ -177,8 +177,7 @@ export function initSync(
     start: async () => {
       // One question by the click: access to the sites, so the sparks synced in get their icons,
       // and in Firefox whether FireDial may send sparks and previews off the computer.
-      const access = browser.permissions.request(IS_CHROME ? ALL_SITES : { ...ALL_SITES, data_collection: SYNC_DATA }).catch(() => false)
-      if (!(await access) && !IS_CHROME) return
+      if (!(await currentBrowser.askSyncAccess())) return
       if (!(await start())) return
       starting = true
       await send('start')

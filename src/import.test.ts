@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import { chromeBookmarks } from './browser/chrome.ts'
+import { firefoxBookmarks } from './browser/firefox.ts'
 import { planImport } from './import.ts'
 import type { BookmarkNode, ImportPlan } from './import.ts'
 import { allocSpark, allocView, emptyDoc, SparkUrl, toLabel } from './model.ts'
@@ -26,7 +28,8 @@ test('every folder becomes a label, a top folder a view too', () => {
       )
     ),
     emptyDoc(),
-    null
+    null,
+    firefoxBookmarks
   )
   assert.deepEqual(shape(plan), [
     ['Board', 'https://board.example/', 'Work'],
@@ -44,7 +47,8 @@ test('bookmarks outside any folder come without a label', () => {
       area('mobile______', 'Mobile')
     ),
     emptyDoc(),
-    null
+    null,
+    firefoxBookmarks
   )
   assert.deepEqual(shape(plan), [
     ['A', 'https://a.example/', ''],
@@ -57,12 +61,12 @@ test("FireDial's own folder stays out, by id or by name", () => {
   const own = folder('FireDial', bookmark('Mine', 'https://mine.example/'))
   const other = folder('FireDial', bookmark('Theirs', 'https://theirs.example/'))
   const bookmarks = tree(area('unfiled_____', 'Other Bookmarks', own), area('toolbar_____', 'Toolbar', other))
-  assert.deepEqual(planImport(bookmarks, emptyDoc(), own.id).views, ['FireDial'], 'a folder of that name elsewhere is just a folder')
+  assert.deepEqual(planImport(bookmarks, emptyDoc(), own.id, firefoxBookmarks).views, ['FireDial'], 'a folder of that name elsewhere is just a folder')
   assert.deepEqual(
-    planImport(bookmarks, emptyDoc(), null).sparks.map((spark) => spark.title),
+    planImport(bookmarks, emptyDoc(), null, firefoxBookmarks).sparks.map((spark) => spark.title),
     ['Theirs']
   )
-  assert.equal(planImport(tree(area('unfiled_____', 'Other Bookmarks', own)), emptyDoc(), null).sparks.length, 0)
+  assert.equal(planImport(tree(area('unfiled_____', 'Other Bookmarks', own)), emptyDoc(), null, firefoxBookmarks).sparks.length, 0)
 })
 
 test("Chrome's bookmarks, without types: folders by their missing address, FireDial's by name in Other bookmarks", () => {
@@ -76,7 +80,7 @@ test("Chrome's bookmarks, without types: folders by their missing address, FireD
       { id: '8', title: 'Other bookmarks', folderType: 'other', children: [chromeFolder('FireDial', link('own')), chromeFolder('Work', link('w'))] }
     ]
   }
-  const plan = planImport(bookmarks, emptyDoc(), null)
+  const plan = planImport(bookmarks, emptyDoc(), null, chromeBookmarks)
   assert.deepEqual(shape(plan), [
     ['bar', 'https://bar.example/', ''],
     ['kept', 'https://kept.example/', 'FireDial'],
@@ -97,7 +101,8 @@ test('a view of the same name is used, and an address FireDial has is left out',
       )
     ),
     doc,
-    null
+    null,
+    firefoxBookmarks
   )
   assert.deepEqual(shape(plan), [['New', 'https://new.example/', 'Work']])
   assert.deepEqual(plan.views, [])
@@ -123,7 +128,8 @@ test('another # or www, or http, is no double', () => {
       )
     ),
     doc,
-    null
+    null,
+    firefoxBookmarks
   )
   assert.equal(plan.sparks.length, 4)
   assert.equal(plan.known, 1)
@@ -134,10 +140,10 @@ test('importing what was imported adds nothing', () => {
     area('toolbar_____', 'Toolbar', bookmark('Loose', 'https://loose.example/'), folder('Work', folder('Docs', bookmark('D', 'https://d.example/'))))
   )
   const doc = emptyDoc()
-  const plan = planImport(bookmarks, doc, null)
+  const plan = planImport(bookmarks, doc, null, firefoxBookmarks)
   for (const title of plan.views) allocView(doc, title)
   for (const spark of plan.sparks) allocSpark(doc, { ...spark, thumb: null })
-  const again = planImport(bookmarks, doc, null)
+  const again = planImport(bookmarks, doc, null, firefoxBookmarks)
   assert.deepEqual([again.sparks.length, again.known, again.views.length], [0, 2, 0])
 })
 
@@ -154,7 +160,8 @@ test('separators, queries and addresses FireDial can not hold are left out', () 
       )
     ),
     emptyDoc(),
-    null
+    null,
+    firefoxBookmarks
   )
   assert.deepEqual([plan.sparks.length, plan.skipped], [1, 2])
 })
@@ -163,7 +170,7 @@ test('folder names keep their case; commas and empty names go, each label once',
   const labelsFor = (...path: string[]): string => {
     let inner: BookmarkNode = bookmark('X', `https://x${next++}.example/`)
     for (const name of [...path].reverse()) inner = folder(name, inner)
-    const plan = planImport(tree(area('toolbar_____', 'Toolbar', inner)), emptyDoc(), null)
+    const plan = planImport(tree(area('toolbar_____', 'Toolbar', inner)), emptyDoc(), null, firefoxBookmarks)
     return plan.sparks[0]?.labels.join(' | ') ?? ''
   }
   assert.equal(labelsFor('Read Later', 'C++, Rust'), 'Read Later | C++ Rust')
@@ -171,7 +178,12 @@ test('folder names keep their case; commas and empty names go, each label once',
 })
 
 test('a top folder without a usable name makes no view', () => {
-  const plan = planImport(tree(area('toolbar_____', 'Toolbar', folder(' ', folder('Docs', bookmark('D', 'https://d.example/'))))), emptyDoc(), null)
+  const plan = planImport(
+    tree(area('toolbar_____', 'Toolbar', folder(' ', folder('Docs', bookmark('D', 'https://d.example/'))))),
+    emptyDoc(),
+    null,
+    firefoxBookmarks
+  )
   assert.deepEqual(plan.views, [])
   assert.deepEqual(plan.sparks[0]?.labels, ['Docs'])
 })
@@ -194,14 +206,15 @@ test('nodes from an older Firefox, without a type, tell folders from bookmarks b
       ]
     },
     emptyDoc(),
-    null
+    null,
+    firefoxBookmarks
   )
   assert.deepEqual(shape(plan), [
     ['Loose', 'https://loose.example/', ''],
     ['Inner', 'https://inner.example/', 'Old']
   ])
   assert.deepEqual(plan.views, ['Old'])
-  assert.deepEqual(planImport({ id: 'root________', title: '' }, emptyDoc(), null).sparks, [], 'a tree without children')
+  assert.deepEqual(planImport({ id: 'root________', title: '' }, emptyDoc(), null, firefoxBookmarks).sparks, [], 'a tree without children')
 })
 
 test("FireDial's own folder stays out by id at any depth; elsewhere a FireDial folder is just a folder", () => {
@@ -209,16 +222,16 @@ test("FireDial's own folder stays out by id at any depth; elsewhere a FireDial f
   const named = folder('FireDial', bookmark('Named', 'https://named.example/'))
   const bookmarks = tree(area('toolbar_____', 'Toolbar', folder('Work', own, bookmark('W', 'https://w.example/'))), area('unfiled_____', 'Other', named))
   assert.deepEqual(
-    planImport(bookmarks, emptyDoc(), own.id).sparks.map((spark) => spark.title),
+    planImport(bookmarks, emptyDoc(), own.id, firefoxBookmarks).sparks.map((spark) => spark.title),
     ['W', 'Named']
   )
   assert.deepEqual(
-    planImport(tree(area('menu________', 'Menu', folder('FireDial', bookmark('M', 'https://m.example/')))), emptyDoc(), null).views,
+    planImport(tree(area('menu________', 'Menu', folder('FireDial', bookmark('M', 'https://m.example/')))), emptyDoc(), null, firefoxBookmarks).views,
     ['FireDial'],
     'only Other Bookmarks holds FireDial'
   )
   const top = folder('Top', bookmark('T', 'https://t.example/'))
-  assert.deepEqual(planImport(tree(area('toolbar_____', 'Toolbar', top)), emptyDoc(), top.id).sparks, [], 'by id at the top too')
+  assert.deepEqual(planImport(tree(area('toolbar_____', 'Toolbar', top)), emptyDoc(), top.id, firefoxBookmarks).sparks, [], 'by id at the top too')
 })
 
 test('a comma in a folder name becomes a space; place: only counts at the start', () => {
@@ -233,7 +246,8 @@ test('a comma in a folder name becomes a space; place: only counts at the start'
       )
     ),
     emptyDoc(),
-    null
+    null,
+    firefoxBookmarks
   )
   assert.deepEqual(shape(plan), [
     ['Q', 'https://q.example/?find=place:x', 'A B'],

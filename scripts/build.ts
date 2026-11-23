@@ -24,7 +24,7 @@ interface Target {
 }
 
 const targets: Target[] = [
-  { browser: 'firefox', esbuild: 'firefox142', icons: 'browsers/icons' },
+  { browser: 'firefox', esbuild: 'firefox142', icons: 'browsers/firefox/icons' },
   { browser: 'chrome', esbuild: 'chrome134', icons: 'browsers/chrome/icons' }
 ]
 

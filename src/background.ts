@@ -6,16 +6,16 @@
 // page only with the click, so it's always enabled and the click finds out.
 // Also keeps the native bookmarks in sync with the store.
 
-import { ALL_SITES, IS_CHROME } from './browser.ts'
+import { ALL_SITES, currentBrowser } from './browser/index.ts'
 
 import * as z from 'zod/mini'
 
 import { parseBackup } from './backup.ts'
 import { BookmarkSync, hasBookmarkFolder, samePage } from './bookmarks.ts'
 import { GoogleDrive } from './drive.ts'
-import { deviceName, forgetToken, googleAuth, revokeAccess, SYNC_DATA } from './google.ts'
+import { deviceName, forgetToken, googleAuth, revokeAccess } from './google.ts'
 import { SiteIcons } from './icons.ts'
-import { blobToDataUrl, faviconPath, isStoredImage } from './images.ts'
+import { isStoredImage } from './images.ts'
 import { addTo, allocSpark, allocView, isVanilla, newThumbId, nextViewName, SparkId, toLabel, toSparkUrl, ViewId } from './model.ts'
 import type { Doc } from './model.ts'
 import { browserKeyValue, Store, webLock } from './store.ts'
@@ -31,8 +31,7 @@ const DAY = 86_400_000 // ms
 const RevealMessage = z.object({ viewId: ViewId, sparkId: SparkId })
 
 const store = new Store(browserKeyValue, webLock)
-// Chrome has no menu on tabs.
-const contexts: browser.menus.ContextType[] = IS_CHROME ? ['all'] : ['all', 'tab']
+const contexts = currentBrowser.menuContexts
 
 async function buildMenu(): Promise<void> {
   await browser.menus.removeAll()
@@ -96,13 +95,7 @@ async function screenshot(tab: browser.tabs.Tab): Promise<string> {
 async function tabIcon(tab: browser.tabs.Tab): Promise<string> {
   const given = tab.favIconUrl ?? ''
   if (isStoredImage(given)) return given
-  if (!IS_CHROME || !tab.url) return ''
-  try {
-    const response = await fetch(browser.runtime.getURL(faviconPath(tab.url, 64)))
-    return response.ok ? await blobToDataUrl(await response.blob()) : ''
-  } catch {
-    return ''
-  }
+  return tab.url ? currentBrowser.iconOf(tab.url) : ''
 }
 
 async function addSpark(info: browser.menus.OnClickData, tab: browser.tabs.Tab | undefined, viewId: ViewId | null): Promise<void> {
@@ -163,7 +156,7 @@ async function dailyCleanup(): Promise<void> {
   await browserKeyValue.set({ cleanedAt: Date.now() })
 }
 
-const sync = new BookmarkSync(store, browserKeyValue, browser.bookmarks)
+const sync = new BookmarkSync(store, browserKeyValue, browser.bookmarks, currentBrowser.bookmarks)
 
 // Drive sync: changes go up a moment after they're made, so a burst of them goes as one. Newer
 // ones come down when a new tab opens or gets focus, at most every PULL_COOLDOWN; Sync now in
@@ -194,7 +187,7 @@ async function syncCommand(command: SyncCommand): Promise<void> {
     await (command === 'stop' ? driveSync.stop() : driveSync.deleteFromDrive())
     if ((await driveSync.state()).on) return
     await (command === 'delete' ? revokeAccess() : forgetToken())
-    if (!IS_CHROME) await browser.permissions.remove({ data_collection: SYNC_DATA }).catch(() => false)
+    await currentBrowser.dropSyncAccess()
   }
 }
 
@@ -246,7 +239,7 @@ rebuildMenu()
 // there already: sync turns those into the sparks instead. Before sync, so it pushes the defaults.
 async function seed(): Promise<void> {
   await store.load()
-  if (store.revision !== 1 || !isVanilla(store.doc) || (await hasBookmarkFolder(browser.bookmarks))) return
+  if (store.revision !== 1 || !isVanilla(store.doc) || (await hasBookmarkFolder(browser.bookmarks, currentBrowser.bookmarks))) return
   const response = await fetch(browser.runtime.getURL('defaults.json'))
   await store.replaceAll(parseBackup(await response.json()))
 }

@@ -1,15 +1,16 @@
 // The notification. FireDial's page calls showToast directly, the background script injects it
 // into web pages, so one notification serves both.
 
+import { currentBrowser } from '../browser/index.ts'
 import { textOn } from '../color.ts'
 import { accentOf } from '../model.ts'
 import type { ViewId, Prefs, SparkId } from '../model.ts'
 
 const TOAST_TIME = 6000 // ms
 
-// The spark a click on the notification leads to.
-
 declare const chrome: typeof browser // Chrome's name for browser
+
+// The spark a click on the notification leads to.
 
 export interface Reveal {
   viewId: ViewId
@@ -18,7 +19,7 @@ export interface Reveal {
 
 // Runs in web pages, so it can use nothing from outside itself. The shadow root keeps the page's
 // styles out. Notifications stack, the newest at the bottom, and the oldest goes after three.
-export function showToast(text: string, ms: number, background: string, color: string, reveal: Reveal | null): void {
+export function showToast(text: string, ms: number, background: string, color: string, reveal: Reveal | null, api: 'browser' | 'chrome'): void {
   const stack = document.getElementById('firedial-toasts') ?? document.createElement('div')
   stack.id = 'firedial-toasts'
   stack.style.cssText =
@@ -67,14 +68,14 @@ export function showToast(text: string, ms: number, background: string, color: s
       remove()
     } else if (reveal) {
       remove()
-      // This runs in the page, where older Chrome has no browser.*, only chrome.*.
-      void (typeof browser === 'undefined' ? chrome : browser).runtime.sendMessage(reveal)
+      // This runs in the page, where the extension API goes by the browser's name for it.
+      void { browser: () => browser.runtime, chrome: () => chrome.runtime }[api]().sendMessage(reveal)
     }
   })
 }
 
 // showToast's arguments, in the colors the user picked.
-export function toastArgs(text: string, prefs: Prefs, reveal: Reveal | null = null): [string, number, string, string, Reveal | null] {
+export function toastArgs(text: string, prefs: Prefs, reveal: Reveal | null = null): [string, number, string, string, Reveal | null, 'browser' | 'chrome'] {
   const background = accentOf(prefs)
-  return [text, TOAST_TIME, background, textOn(background), reveal]
+  return [text, TOAST_TIME, background, textOn(background), reveal, currentBrowser.pageApi]
 }

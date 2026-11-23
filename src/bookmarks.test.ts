@@ -1,19 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import {
-  BookmarkSync,
-  hasBookmarkFolder,
-  isBookmark,
-  isFolder,
-  labelDataUrls,
-  parseMap,
-  readLabelData,
-  readViewData,
-  samePage,
-  viewDataUrls
-} from './bookmarks.ts'
+import { BookmarkSync, hasBookmarkFolder, labelDataUrls, parseMap, readLabelData, readViewData, samePage, viewDataUrls } from './bookmarks.ts'
 import type { BookmarkApi, TreeNode } from './bookmarks.ts'
+import { chromeBookmarks } from './browser/chrome.ts'
+import { firefoxBookmarks } from './browser/firefox.ts'
+import type { BookmarkTree } from './browser/index.ts'
 import { addLabels, addTo, allocSpark, allocView, arrange, LabelName, LIMITS, moveInView, removeLabels, SparkId, SparkUrl, toLabel } from './model.ts'
 import type { Doc, Spark, View } from './model.ts'
 import { Store } from './store.ts'
@@ -43,6 +35,7 @@ class FakeBookmarks implements BookmarkApi {
   readonly tree: TreeNode
   readonly root: TreeNode // where FireDial's folder belongs
   private readonly typed: boolean
+  readonly browserTree: BookmarkTree // how the browser these areas come from reads them
 
   constructor(areas: TreeNode[] = firefoxAreas(), other = 'unfiled_____') {
     this.tree = { id: 'root________', title: '', children: areas }
@@ -50,6 +43,7 @@ class FakeBookmarks implements BookmarkApi {
     assert.ok(root)
     this.root = root
     this.typed = areas.some((area) => area.type !== undefined)
+    this.browserTree = this.typed ? firefoxBookmarks : chromeBookmarks
   }
 
   getTree(): Promise<TreeNode[]> {
@@ -186,7 +180,7 @@ interface Setup {
 async function setup(api = new FakeBookmarks()): Promise<Setup> {
   const kv = memory()
   const store = new Store(kv, noLock)
-  const sync = new BookmarkSync(store, kv, api)
+  const sync = new BookmarkSync(store, kv, api, api.browserTree)
   await store.load()
   return { kv, store, api, sync, settle: () => sync.start() }
 }
@@ -231,49 +225,72 @@ async function secondDevice(api: FakeBookmarks): Promise<Setup> {
   const kv = memory()
   const store = new Store(kv, noLock)
   await store.load()
-  const sync = new BookmarkSync(store, kv, api)
+  const sync = new BookmarkSync(store, kv, api, api.browserTree)
   await sync.start()
   return { kv, store, api, sync, settle: () => sync.start() }
 }
 
 test("FireDial's folder counts only as a folder named FireDial in Other Bookmarks", async () => {
   const api = new FakeBookmarks()
-  assert.equal(await hasBookmarkFolder(api), false)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), false)
   await api.create({ parentId: 'unfiled_____', title: 'FireDial', url: 'https://example.com/' })
   await api.create({ parentId: 'unfiled_____', title: 'Other' })
-  assert.equal(await hasBookmarkFolder(api), false)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), false)
   await api.create({ parentId: 'unfiled_____', title: 'FireDial' })
-  assert.equal(await hasBookmarkFolder(api), true)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), true)
 })
 
-test("folders and bookmarks, by Firefox's type or, in Chrome, by the address", () => {
-  const kinds = (node: Pick<TreeNode, 'type' | 'url'>): [boolean, boolean] => [isFolder(node), isBookmark(node)]
-  assert.deepEqual(kinds({ type: 'folder' }), [true, false])
-  assert.deepEqual(kinds({ type: 'bookmark', url: 'https://a.example/' }), [false, true])
-  assert.deepEqual(kinds({ type: 'separator', url: 'data:' }), [false, false])
-  assert.deepEqual(kinds({ type: 'separator' }), [false, false])
-  assert.deepEqual(kinds({}), [true, false])
-  assert.deepEqual(kinds({ url: 'https://a.example/' }), [false, true])
+const kinds =
+  (tree: BookmarkTree) =>
+  (node: Pick<TreeNode, 'type' | 'url'>): [boolean, boolean] => [tree.isFolder(node), tree.isBookmark(node)]
+
+test("folders and bookmarks by Firefox's type, or by the address in nodes from older Firefox", () => {
+  const firefox = kinds(firefoxBookmarks)
+  assert.deepEqual(firefox({ type: 'folder' }), [true, false])
+  assert.deepEqual(firefox({ type: 'bookmark', url: 'https://a.example/' }), [false, true])
+  assert.deepEqual(firefox({ type: 'separator', url: 'data:' }), [false, false])
+  assert.deepEqual(firefox({ type: 'separator' }), [false, false])
+  assert.deepEqual(firefox({}), [true, false])
+  assert.deepEqual(firefox({ url: 'https://a.example/' }), [false, true])
+})
+
+test('in Chrome, folders and bookmarks by the address', () => {
+  const chrome = kinds(chromeBookmarks)
+  assert.deepEqual(chrome({}), [true, false])
+  assert.deepEqual(chrome({ url: null }), [true, false])
+  assert.deepEqual(chrome({ url: 'https://a.example/' }), [false, true])
+})
+
+test('Other Bookmarks: by id in Firefox, by folder type in Chrome, preferring the synced one', () => {
+  const firefox = [{ id: 'toolbar_____' }, { id: 'unfiled_____' }]
+  assert.equal(firefoxBookmarks.otherBookmarks(firefox)?.id, 'unfiled_____')
+  assert.equal(firefoxBookmarks.isOtherBookmarks({ id: 'unfiled_____' }), true)
+  assert.equal(firefoxBookmarks.isOtherBookmarks({ id: '2', folderType: 'other' }), false)
+  assert.equal(chromeBookmarks.otherBookmarks(chromeAreas())?.id, '8')
+  assert.equal(chromeBookmarks.otherBookmarks(chromeAreas().slice(0, 2))?.id, '2')
+  assert.equal(chromeBookmarks.otherBookmarks([]), undefined)
+  assert.equal(chromeBookmarks.isOtherBookmarks({ id: '2', folderType: 'other' }), true)
+  assert.equal(chromeBookmarks.isOtherBookmarks({ id: 'unfiled_____' }), false)
 })
 
 test('a FireDial folder elsewhere, e.g. in the toolbar, is not the one', async () => {
   const api = new FakeBookmarks()
   await api.create({ parentId: 'toolbar_____', title: 'FireDial' })
-  assert.equal(await hasBookmarkFolder(api), false)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), false)
 })
 
 test("in Chrome, FireDial's folder goes to the Other bookmarks that sync to the account", async () => {
   const api = new FakeBookmarks(chromeAreas(), '8')
-  assert.equal(await hasBookmarkFolder(api), false)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), false)
   await api.create({ parentId: '2', title: 'FireDial' }) // on this device only
-  assert.equal(await hasBookmarkFolder(api), false)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), false)
   const { store, settle } = await setup(api)
   await store.commit((doc) => {
     spark(doc, 'a')
     return undefined
   })
   await settle()
-  assert.equal(await hasBookmarkFolder(api), true)
+  assert.equal(await hasBookmarkFolder(api, api.browserTree), true)
   assert.deepEqual(api.shape(), ['a', 'FireDial views'])
   assert.equal(api.child('a').type, undefined)
 })
@@ -307,7 +324,7 @@ test('in Chrome, bookmark edits come back as edits of the sparks', async () => {
 test('without Other Bookmarks there is no place for the folder', async () => {
   const api = new FakeBookmarks()
   api.tree.children = []
-  await assert.rejects(hasBookmarkFolder(api), /No Other Bookmarks/)
+  await assert.rejects(hasBookmarkFolder(api, api.browserTree), /No Other Bookmarks/)
 })
 
 test("first push puts every spark in FireDial's folder, in All's order, then the data", async () => {

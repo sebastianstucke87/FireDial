@@ -1,4 +1,4 @@
-# Every push to main and every pull request (e.g. from Dependabot) is tested, in Firefox and Chrome. A tag like v2026.11.10.1834 on main is also submitted to addons.mozilla.org and the Chrome Web Store, each by its own job once the tests passed. The repository variables AMO_UPLOAD and CWS_UPLOAD set to 'false' skip that store.
+# Every push to main and every pull request (e.g. from Dependabot) is tested, in Firefox and Chrome. A tag like v2026.11.10.1834 on main is also submitted to Firefox Add-ons and the Chrome Web Store, each by its own job once the tests passed. The repository variables FIREFOX_ADD_ONS_UPLOAD and CHROME_WEB_STORE_UPLOAD set to 'false' skip that store.
 
 name: Release
 
@@ -152,16 +152,16 @@ jobs:
           archive: false
           if-no-files-found: warn
 
-  # The AMO keys live in the environment amo, which only v* tags may use. Runs once the release
-  # job tested the tag, builds it the same way and submits it. Listed versions need review, usually
-  # automatic; waiting for it could outlast this job, so submit and finish.
-  amo:
+  # The Firefox Add-ons keys live in the environment firefox-add-ons, which only v* tags may use.
+  # Runs once the release job tested the tag, builds it the same way and submits it. Listed versions
+  # need review, usually automatic; waiting for it could outlast this job, so submit and finish.
+  firefox-add-ons:
     name: Firefox Add-ons
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && vars.AMO_UPLOAD != 'false'
+    if: startsWith(github.ref, 'refs/tags/v') && vars.FIREFOX_ADD_ONS_UPLOAD != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: amo
+    environment: firefox-add-ons
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -172,20 +172,20 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: FIREDIAL_VERSION="${GITHUB_REF_NAME#v}" npm run build
-      - name: Submit to addons.mozilla.org
+      - name: Submit to Firefox Add-ons
         run: |
           git ls-files -z | xargs -0 zip -q firedial-source.zip
-          npx web-ext sign --source-dir dist/firefox --channel listed --amo-metadata browsers/publishing/amo-metadata.json --upload-source-code firedial-source.zip --approval-timeout 0
+          npx web-ext sign --source-dir dist/firefox --channel listed --amo-metadata browsers/firefox/store/metadata.json --upload-source-code firedial-source.zip --approval-timeout 0
         env:
-          WEB_EXT_API_KEY: ${{ secrets.AMO_API_KEY }}
-          WEB_EXT_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+          WEB_EXT_API_KEY: ${{ secrets.FIREFOX_ADD_ONS_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.FIREFOX_ADD_ONS_API_SECRET }}
 
   # The Chrome Web Store's keys live in the environment chrome-web-store, which only v* tags may
   # use. Runs once the release job tested the tag, builds it the same way and submits it for review.
-  cws:
+  chrome-web-store:
     name: Chrome Web Store
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && vars.CWS_UPLOAD != 'false'
+    if: startsWith(github.ref, 'refs/tags/v') && vars.CHROME_WEB_STORE_UPLOAD != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: chrome-web-store
@@ -201,11 +201,11 @@ jobs:
       - run: FIREDIAL_VERSION="${GITHUB_REF_NAME#v}" npm run build
       - name: Cancel a pending review (the draft keeps its changes)
         env:
-          EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
-          PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          EXTENSION_ID: ${{ secrets.CHROME_WEB_STORE_EXTENSION_ID }}
+          PUBLISHER_ID: ${{ secrets.CHROME_WEB_STORE_PUBLISHER_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_WEB_STORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_WEB_STORE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_WEB_STORE_REFRESH_TOKEN }}
         run: |
           token=$(curl -sS --fail https://oauth2.googleapis.com/token \
             --data-urlencode "client_id=$CLIENT_ID" --data-urlencode "client_secret=$CLIENT_SECRET" \
@@ -216,8 +216,8 @@ jobs:
             "https://chromewebstore.googleapis.com/v2/publishers/$PUBLISHER_ID/items/$EXTENSION_ID:cancelSubmission" || true
       - run: npx chrome-webstore-upload --source dist/chrome
         env:
-          EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
-          PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          EXTENSION_ID: ${{ secrets.CHROME_WEB_STORE_EXTENSION_ID }}
+          PUBLISHER_ID: ${{ secrets.CHROME_WEB_STORE_PUBLISHER_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_WEB_STORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_WEB_STORE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_WEB_STORE_REFRESH_TOKEN }}

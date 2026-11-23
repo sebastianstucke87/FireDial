@@ -1,15 +1,15 @@
-<img height="150" src="browsers/publishing/amo-icon.png"/>
+<img height="150" src="browsers/shared/logo.png"/>
 
 # FireDial
 
 Minimal speed dial for your bookmarks in Firefox and Chrome! Completely free and open source: no ads, no account, no tracking, no BS.
 
-<img src="browsers/screenshots/light.png" alt="FireDial in light, wide layout"/>
+<img src="browsers/shared/screenshots/light.png" alt="FireDial in light, wide layout"/>
 
 <p>
-  <img width="32%" src="browsers/screenshots/dark.png" alt="FireDial in dark, Violet, tiles"/>
-  <img width="32%" src="browsers/screenshots/edit.png" alt="FireDial in Edit, dark, Teal"/>
-  <img width="32%" src="browsers/screenshots/list.png" alt="FireDial in light, light blue, list, with colorful labels"/>
+  <img width="32%" src="browsers/shared/screenshots/dark.png" alt="FireDial in dark, Violet, tiles"/>
+  <img width="32%" src="browsers/shared/screenshots/edit.png" alt="FireDial in Edit, dark, Teal"/>
+  <img width="32%" src="browsers/shared/screenshots/list.png" alt="FireDial in light, light blue, list, with colorful labels"/>
 </p>
 
 ## Install
@@ -47,6 +47,11 @@ To load it until Firefox restarts:
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click `Load Temporary Add-on...`
 3. Pick `dist/firefox/manifest.json`
+
+Words used in the code, enforced by `npm test`:
+
+- **Browser** (`firefox`, `chrome`): where FireDial runs. Names folders, code and `dist`. What differs per browser lives in `src/browser/`.
+- **Store** (Firefox Add-ons, Chrome Web Store): where FireDial is published. Names GitHub environments, secrets and `browsers/<browser>/store/`.
 
 ## Trust
 

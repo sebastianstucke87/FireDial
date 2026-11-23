@@ -334,7 +334,7 @@ test('notification: flame, text and dismiss button in the chosen color', async (
 })
 
 test('notification: without a destination a click does nothing, and it ends by itself', async () => {
-  await page(`showToast('Hello', 400, '#000000', '#ffffff', null)`)
+  await page(`showToast('Hello', 400, '#000000', '#ffffff', null, 'browser')`)
   await (await (await toast()).findElement({ css: 'span' })).click()
   assert.equal(await toasts(), 1)
   await until('it to end', async () => (await toasts()) === 0)
