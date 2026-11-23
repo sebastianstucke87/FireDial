@@ -667,6 +667,8 @@ input::placeholder {
    More columns than 1200px hold make the grid wider, so a wide window can show them. */
 .Sparks {
   --tile-min: 130px;
+  --icon: 58%; /* a small icon's height in its preview */
+  --letter: 42px;
   --row-gap: var(--gap);
   --col-gap: var(--gap);
 
@@ -723,13 +725,13 @@ input::placeholder {
 
 .Thumb--small img {
   width: auto;
-  height: 46%;
+  height: var(--icon, 46%);
 } /* an icon: blurry at full size */
 .Letter {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 34px;
+  font-size: var(--letter, 34px);
   font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
@@ -920,6 +922,11 @@ body.editing .Sparks .Spark {
 }
 
 /* Square layout: 1:1 previews */
+[data-layout='square'] .Sparks {
+  --icon: 50%;
+  --letter: 48px;
+}
+
 [data-layout='square'] .Sparks .Thumb {
   aspect-ratio: 1;
 }
@@ -927,6 +934,8 @@ body.editing .Sparks .Spark {
 /* Wide layout: text-friendly, about 4:1 */
 [data-layout='wide'] .Sparks {
   --tile-min: 240px;
+  --icon: 64%;
+  --letter: 28px;
 }
 
 [data-layout='wide'] .Sparks .Spark {
@@ -952,13 +961,10 @@ body.editing .Sparks .Spark {
   display: block;
 }
 
-[data-layout='wide'] .Sparks .Letter {
-  font-size: 22px;
-}
-
 /* List layout: compact rows with a small icon */
 [data-layout='list'] .Sparks {
   --tile-min: 200px;
+  --letter: 15px;
   --row-gap: calc(var(--gap) * 0.45);
   --col-gap: calc(var(--gap) * 0.8);
 }
@@ -989,10 +995,6 @@ body.editing .Sparks .Spark {
   flex: 1;
   padding: 0;
   text-align: left;
-}
-
-[data-layout='list'] .Sparks .Letter {
-  font-size: 15px;
 }
 
 [data-layout='list'] .AddSpark .Thumb {

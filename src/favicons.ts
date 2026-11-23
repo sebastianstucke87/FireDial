@@ -1,10 +1,13 @@
-// Icons for sparks without a picture, from each site itself: its home page names the icons, the
-// biggest one wins, /favicon.ico when it names none. No other service hears of the sites.
+// Icons for sparks without a picture, from each site itself: its home page names the icons, and
+// its web app manifest more, the biggest one wins, /favicon.ico when it names none. No other
+// service hears of the sites.
 //
 // Many sites at once, as many as keep answering fast: a few to begin with, more while the typical
 // time stays steady, half as many as soon as it climbs. Typical is the middle of the last few
 // answers, a failure counting as the slowest: one slow or dead site among them changes nothing,
 // as sites differ anyway; most of them slowing down or failing does.
+
+import * as z from 'zod/mini'
 
 const FETCH_TIMEOUT = 6000 // ms, for a page or an icon
 const START = 8
@@ -14,8 +17,10 @@ const STEP = 2
 const SLOWER = 2 // times the steady time that count as climbing
 const WINDOW = 8 // the last answers whose middle time is the typical one
 const PAGE_MAX = 1024 ** 2 // bytes of a home page read for its icons, which its head names
+const MANIFEST_MAX = 256 * 1024 // bytes of a web app manifest read
+const TOUCH = 2000 // rank of the icons made for home screens (apple-touch-icon, manifest): big and filled
 
-interface IconLink {
+export interface IconLink {
   url: string
   rank: number
 }
@@ -32,16 +37,63 @@ function sizeOf(sizes: string | null): number {
   return Math.max(0, ...[...sizes.matchAll(/(\d+)x\d+/gi)].map((match) => Number(match[1])))
 }
 
-// The icons a page names, best first, and /favicon.ico last.
-export function iconUrls(html: string, pageUrl: string): string[] {
-  const links: IconLink[] = []
+// The base a page's addresses are relative to.
+function baseOf(html: string, pageUrl: string): string {
   const base = attribute(/<base\b[^>]*>/i.exec(html)?.[0] ?? '', 'href')
-  let baseUrl = pageUrl
   try {
-    baseUrl = new URL(base ?? '', pageUrl).href
+    return new URL(base ?? '', pageUrl).href
   } catch {
-    // a broken <base>: the page's own address
+    return pageUrl // a broken <base>: the page's own address
   }
+}
+
+// The web app manifest a page names, if any.
+export function manifestUrl(html: string, pageUrl: string): string | null {
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
+    const rel = (attribute(tag, 'rel') ?? '').toLowerCase().split(/\s+/)
+    const href = attribute(tag, 'href')
+    if (!rel.includes('manifest') || !href) continue
+    try {
+      const url = new URL(href, baseOf(html, pageUrl))
+      return /^https?:$/.test(url.protocol) ? url.href : null
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+const Manifest = z.object({ icons: z.array(z.unknown()) })
+const ManifestIcon = z.object({ src: z.string(), sizes: z.optional(z.string()), purpose: z.optional(z.string()) })
+
+// The icons a web app manifest names, ranked as a page's. Maskable ones have room around the
+// picture for a home screen's own shape: after the others.
+export function manifestIcons(text: string, url: string): IconLink[] {
+  let data: unknown
+  try {
+    data = JSON.parse(text)
+  } catch {
+    return []
+  }
+  const icons = Manifest.safeParse(data).data?.icons ?? []
+  const links: IconLink[] = []
+  for (const icon of icons) {
+    const { src, sizes, purpose } = ManifestIcon.safeParse(icon).data ?? {}
+    if (!src) continue
+    try {
+      const maskableOnly = !!purpose && !/\bany\b/i.test(purpose) && /\bmaskable\b/i.test(purpose)
+      links.push({ url: new URL(src, url).href, rank: (maskableOnly ? TOUCH / 2 : TOUCH) + sizeOf(sizes ?? null) })
+    } catch {
+      // the next one
+    }
+  }
+  return links
+}
+
+// The icons a page names, and its manifest's (more), best first, and /favicon.ico last.
+export function iconUrls(html: string, pageUrl: string, more: readonly IconLink[] = []): string[] {
+  const links: IconLink[] = [...more]
+  const baseUrl = baseOf(html, pageUrl)
   for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
     const rel = (attribute(tag, 'rel') ?? '').toLowerCase().split(/\s+/)
     const href = attribute(tag, 'href')
@@ -52,7 +104,7 @@ export function iconUrls(html: string, pageUrl: string): string[] {
     } catch {
       continue
     }
-    if (rel.includes('apple-touch-icon') || rel.includes('apple-touch-icon-precomposed')) links.push({ url, rank: 2000 + sizeOf(attribute(tag, 'sizes')) })
+    if (rel.includes('apple-touch-icon') || rel.includes('apple-touch-icon-precomposed')) links.push({ url, rank: TOUCH + sizeOf(attribute(tag, 'sizes')) })
     else if (rel.includes('icon')) links.push({ url, rank: sizeOf(attribute(tag, 'sizes')) || 16 })
   }
   const ordered = links.sort((a, b) => b.rank - a.rank).map((link) => link.url)
@@ -170,7 +222,17 @@ export async function loadIcons(
       } catch {
         // no page: /favicon.ico may still be there
       }
-      for (const url of iconUrls(html, page)) {
+      let more: IconLink[] = []
+      const manifest = manifestUrl(html, page)
+      if (manifest) {
+        try {
+          const response = await fetchWithin(manifest, options.signal, fetcher)
+          if (response.ok) more = manifestIcons(await pageStart(response, MANIFEST_MAX), response.url || manifest)
+        } catch {
+          // the page's own icons
+        }
+      }
+      for (const url of iconUrls(html, page, more)) {
         try {
           const response = await fetchWithin(url, options.signal, fetcher)
           const image = response.ok ? await toImage(response) : null

@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/{background,newtab,theme}.ts", "scripts/*.ts", "{src,e2e}/**/*.test.ts"],
+  "entry": ["src/{background,newtab,theme,upscaler}.ts", "scripts/*.ts", "{src,e2e}/**/*.test.ts"],
   "project": ["{src,e2e,scripts}/**/*.ts"],
   "ignoreBinaries": ["rundll32"]
 }

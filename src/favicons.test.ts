@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { iconUrls, loadIcons, pageStart, runAdaptive } from './favicons.ts'
+import { iconUrls, loadIcons, manifestIcons, manifestUrl, pageStart, runAdaptive } from './favicons.ts'
 
 test('the biggest icon a page names comes first, /favicon.ico last', () => {
   const html = `<head>
@@ -34,6 +34,37 @@ test('relative icons follow <base>, any size counts as the biggest', () => {
     'https://static.example/assets/j.png',
     'https://a.example/favicon.ico'
   ])
+})
+
+test('a web app manifest adds its icons, the biggest first, maskable ones after the others', () => {
+  const html =
+    '<base href="https://a.example/app/"><link rel="manifest" href="site.webmanifest"><link rel="apple-touch-icon" href="/touch.png" sizes="180x180">'
+  const url: string | null = manifestUrl(html, 'https://a.example/')
+  assert.equal(url, 'https://a.example/app/site.webmanifest')
+  const manifest = JSON.stringify({
+    icons: [
+      { src: 'i/192.png', sizes: '192x192' },
+      { src: 'i/512.png', sizes: '512x512', purpose: 'any maskable' },
+      { src: 'i/mask.png', sizes: '1024x1024', purpose: 'maskable' },
+      { sizes: '64x64' },
+      'broken'
+    ]
+  })
+  assert.deepEqual(iconUrls(html, 'https://a.example/', manifestIcons(manifest, 'https://a.example/app/site.webmanifest')), [
+    'https://a.example/app/i/512.png',
+    'https://a.example/app/i/192.png',
+    'https://a.example/touch.png',
+    'https://a.example/app/i/mask.png',
+    'https://a.example/favicon.ico'
+  ])
+})
+
+test('a missing, broken or odd manifest adds nothing', () => {
+  assert.equal(manifestUrl('<link rel="icon" href="/i.png">', 'https://a.example/'), null)
+  assert.equal(manifestUrl('<link rel="manifest" href="javascript:alert(1)">', 'https://a.example/'), null)
+  assert.deepEqual(manifestIcons('not json', 'https://a.example/m.json'), [])
+  assert.deepEqual(manifestIcons('{"icons": "none"}', 'https://a.example/m.json'), [])
+  assert.deepEqual(manifestIcons('null', 'https://a.example/m.json'), [])
 })
 
 // A clock that jumps from one finished wait to the next, as a real one would get there.
@@ -139,7 +170,8 @@ test('an abort starts nothing new, and all items run without one', async () => {
 test('each site gets the first icon that loads, from the site itself only', async () => {
   const asked: string[] = []
   const pages: Record<string, string> = {
-    'https://a.example/': '<link rel="apple-touch-icon" href="/missing.png"><link rel="icon" href="/ok.png">',
+    'https://a.example/': '<link rel="apple-touch-icon" href="/missing.png"><link rel="icon" href="/ok.png"><link rel="manifest" href="/m.json">',
+    'https://a.example/m.json': '{"icons": [{"src": "/big.png", "sizes": "512x512"}]}',
     'https://b.example/': ''
   }
   const fetcher: typeof fetch = (input) => {
@@ -163,6 +195,7 @@ test('each site gets the first icon that loads, from the site itself only', asyn
       ['https://b.example', 'data:image/png,img']
     ]
   )
+  assert.ok(asked.indexOf('https://a.example/big.png') < asked.indexOf('https://a.example/ok.png'), 'the big icon of the manifest is tried first')
   assert.ok(
     asked.every((url) => /^https:\/\/[abc]\.example\//.test(url)),
     asked.join()
