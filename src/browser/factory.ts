@@ -7,6 +7,7 @@
 import * as z from 'zod/mini'
 
 import { chromeFor } from './chrome.ts'
+import { edge } from './edge.ts'
 import { firefox } from './firefox.ts'
 import type { Browser } from './shared.ts'
 
@@ -41,7 +42,12 @@ export function productOf(userAgentData: unknown): string {
   return (brand ?? 'Chrome').replace(/^(Google|Microsoft) /, '')
 }
 
+// Browsers made from Chromium count as Chrome, but Edge, which differs.
+function chromiumFor(product: string): Browser {
+  return product === 'Edge' ? edge : chromeFor(product)
+}
+
 // Node, where the tests run, counts as Firefox.
 export function browserFor<T extends Api>(scope: Scope<T>, userAgentData: unknown): Browser {
-  return adapt(scope) ? chromeFor(productOf(userAgentData)) : firefox
+  return adapt(scope) ? chromiumFor(productOf(userAgentData)) : firefox
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { chromeFor } from './chrome.ts'
+import { edge } from './edge.ts'
 import { firefox } from './firefox.ts'
 import { adapt, browserFor, productOf } from './factory.ts'
 import { currentBrowser } from './index.ts'
@@ -58,8 +59,10 @@ test('in Node, which is neither, FireDial counts as in Firefox', () => {
 test("the browser is picked by the address of FireDial's pages", () => {
   assert.equal(browserFor({ browser: api('moz-extension://uuid/') }, undefined), firefox)
   const chrome = browserFor({ chrome: api('chrome-extension://id/') }, { brands: [{ brand: 'Google Chrome' }] })
-  assert.equal(chrome.name, 'Chrome')
   assert.equal(chrome.product, 'Chrome')
+  assert.equal(browserFor({ chrome: api('chrome-extension://id/') }, { brands: [{ brand: 'Microsoft Edge' }, { brand: 'Chromium' }] }), edge)
+  const brave = browserFor({ chrome: api('chrome-extension://id/') }, { brands: [{ brand: 'Brave' }] })
+  assert.equal(brave.product, 'Brave')
 })
 
 test('a browser made from Chromium is known by its brand, without the maker', () => {

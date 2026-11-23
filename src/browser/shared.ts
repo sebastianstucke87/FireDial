@@ -31,7 +31,6 @@ export interface BookmarkTree {
 type Tab = Pick<browser.tabs.Tab, 'id' | 'windowId'>
 
 export interface Browser {
-  readonly name: string // as the browser calls itself: "Firefox bookmarks"
   readonly product: string // the browser as the user knows it, for the Sync section's device name
   readonly menuContexts: browser.menus.ContextType[]
   readonly bookmarks: BookmarkTree

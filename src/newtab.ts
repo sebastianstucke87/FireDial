@@ -2275,7 +2275,6 @@ document.addEventListener('focusout', () => {
 
 function openAbout(): void {
   html('#aboutVersion').textContent = `FireDial ${browser.runtime.getManifest().version}`
-  html('#browserName').textContent = currentBrowser.name
   void showSiteAccess()
   void aboutModal.open()
 }
@@ -2311,7 +2310,7 @@ async function importBookmarks(): Promise<void> {
   const sure = await confirm.ask(
     {
       title: 'Import bookmarks',
-      text: `Import ${plural(plan.sparks.length, 'bookmark')} from ${plural(plan.folders, 'folder')}${plan.known ? ` (${plan.known} ${plan.known === 1 ? 'is' : 'are'} in FireDial already)` : ''}. Folders become labels; top folders also become views. ${currentBrowser.name}'s bookmarks stay as they are.`,
+      text: `Import ${plural(plan.sparks.length, 'bookmark')} from ${plural(plan.folders, 'folder')}${plan.known ? ` (${plan.known} ${plan.known === 1 ? 'is' : 'are'} in FireDial already)` : ''}. Folders become labels; top folders also become views. The browser's bookmarks stay as they are.`,
       button: 'Import'
     },
     () => {
