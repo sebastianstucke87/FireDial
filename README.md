@@ -34,13 +34,15 @@ npm ci
 npm run build
 ```
 
-The builds are in `dist/chrome` and `dist/firefox`. `npm test` runs the checks and the tests in headless Chrome and Firefox.
+The builds are in `dist/chrome`, `dist/edge` and `dist/firefox`. `npm test` runs the checks and the tests in headless Chrome, Edge and Firefox.
 
 To load your build in Chrome:
 
 1. Open `chrome://extensions`
 2. Turn on `Developer mode`
 3. Click `Load unpacked` and pick `dist/chrome`
+
+The same in Edge: `edge://extensions`, `Developer mode`, `Load unpacked`, `dist/edge`.
 
 To load it until Firefox restarts:
 
@@ -50,8 +52,8 @@ To load it until Firefox restarts:
 
 Words used in the code, enforced by `npm test`:
 
-- **Browser** (`firefox`, `chrome`): where FireDial runs. Names folders, code and `dist`. What differs per browser lives in `src/browser/`.
-- **Store** (Firefox Add-ons, Chrome Web Store): where FireDial is published. Names GitHub environments, secrets and `browsers/<browser>/store/`.
+- **Browser** (`firefox`, `chrome`, `edge`): where FireDial runs. Names folders, code and `dist`. What differs per browser lives in `src/browser/`.
+- **Store** (Firefox Add-ons, Chrome Web Store, Edge Add-ons): where FireDial is published. Names GitHub environments, secrets and `browsers/<browser>/store/`.
 
 ## Trust
 

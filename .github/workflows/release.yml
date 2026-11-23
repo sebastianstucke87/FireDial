@@ -1,4 +1,4 @@
-# Every push to main and every pull request (e.g. from Dependabot) is tested, in Firefox and Chrome. A tag like v2026.11.10.1834 on main is also submitted to Firefox Add-ons and the Chrome Web Store, each by its own job once the tests passed. The repository variables FIREFOX_ADD_ONS_UPLOAD and CHROME_WEB_STORE_UPLOAD set to 'false' skip that store.
+# Every push to main and every pull request (e.g. from Dependabot) is tested, in Firefox, Chrome and Edge. A tag like v2026.11.10.1834 on main is also submitted to Firefox Add-ons, the Chrome Web Store and Edge Add-ons, each by its own job once the tests passed. The repository variables FIREFOX_ADD_ONS_UPLOAD and CHROME_WEB_STORE_UPLOAD set to 'false' skip that store; EDGE_ADD_ONS_UPLOAD must be 'true' for Edge.
 
 name: Release
 
@@ -221,3 +221,32 @@ jobs:
           CLIENT_ID: ${{ secrets.CHROME_WEB_STORE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CHROME_WEB_STORE_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.CHROME_WEB_STORE_REFRESH_TOKEN }}
+
+  # The Edge Add-ons keys live in the environment edge-add-ons, which only v* tags may use. Runs once
+  # the release job tested the tag, builds it the same way, uploads it and submits it for review.
+  # Only once EDGE_ADD_ONS_UPLOAD is 'true': the first version went in by hand, through Partner Center.
+  edge-add-ons:
+    name: Edge Add-ons
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && vars.EDGE_ADD_ONS_UPLOAD == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: edge-add-ons
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 26
+          package-manager-cache: false
+      - run: npm ci
+      - run: FIREDIAL_VERSION="${GITHUB_REF_NAME#v}" npm run build
+      - name: Submit to Edge Add-ons
+        run: |
+          (cd dist/edge && zip -qr ../edge.zip .)
+          node scripts/edge-add-ons.ts dist/edge.zip "FireDial ${GITHUB_REF_NAME#v}: https://github.com/sebastianstucke87/FireDial/tree/${GITHUB_REF_NAME}"
+        env:
+          EDGE_ADD_ONS_CLIENT_ID: ${{ secrets.EDGE_ADD_ONS_CLIENT_ID }}
+          EDGE_ADD_ONS_API_KEY: ${{ secrets.EDGE_ADD_ONS_API_KEY }}
+          EDGE_ADD_ONS_PRODUCT_ID: ${{ secrets.EDGE_ADD_ONS_PRODUCT_ID }}

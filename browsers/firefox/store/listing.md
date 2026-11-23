@@ -29,7 +29,7 @@ FireDial turns your new tab into a speed dial of your bookmarks, in views. Add a
 
 Pick a layout, columns, light or dark and an accent color. Search, undo, backups.
 
-Optional Sync keeps FireDial the same in Firefox and Chrome, through your own Google Drive.
+Optional Sync keeps FireDial the same in Firefox, Chrome and Edge, through your own Google Drive.
 
 No ads, no account, no tracking. Your sparks are Firefox bookmarks, so Firefox Sync carries them. Open source: https://github.com/sebastianstucke87/FireDial
 
