@@ -13,6 +13,7 @@
     "!src/background.ts",
     "!src/newtab.ts",
     "!src/theme.ts",
+    "!src/upscaler.ts",
     "!src/theme-key.ts",
     "!src/google.ts",
     "!src/sync-config.ts"

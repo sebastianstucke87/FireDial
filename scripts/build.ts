@@ -39,7 +39,7 @@ const licenses = [license('FireDial', 'LICENSE'), license('zod', 'node_modules/z
 for (const target of targets) {
   const out = `dist/${target.browser}`
   await build({
-    entryPoints: ['src/background.ts', 'src/newtab.ts', 'src/theme.ts'],
+    entryPoints: ['src/background.ts', 'src/newtab.ts', 'src/theme.ts', 'src/upscaler.ts'],
     outdir: `${out}/js`,
     bundle: true,
     format: 'esm',

@@ -7,7 +7,7 @@ import { parseMap } from './bookmarks.ts'
 import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
-import { addIcons, originOf, originOfKey, readIcons, SiteIcons, sitesOf } from './icons.ts'
+import { addIcons, iconWidth, isSmallIcon, originOf, originOfKey, readIcons, SiteIcons, SMALL_ICON, sitesOf } from './icons.ts'
 import { blobToDataUrl, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
@@ -509,6 +509,51 @@ function readColor(img: HTMLImageElement): string | null {
   }
 }
 
+// Small icons, upscaled once each in a worker of its own (js/upscaler.js), for as long as the tab is
+// open: a blob URL, '' for one that can't be.
+const upscaled = new Map<string, string>()
+const upscaling = new Map<string, Promise<string>>()
+const waiting = new Map<number, (blob: Blob | null) => void>()
+let upscaler: Worker | null = null
+let nextId = 0
+
+// img: the icon, loaded.
+function upscaledOf(src: string, img: HTMLImageElement): Promise<string> {
+  const known = upscaling.get(src)
+  if (known) return known
+  let pixels: ImageData | undefined
+  try {
+    const { naturalWidth: width, naturalHeight: height } = img
+    const context = el('canvas', { width, height }).getContext('2d', { willReadFrequently: true })
+    context?.drawImage(img, 0, 0)
+    pixels = context?.getImageData(0, 0, width, height)
+  } catch {
+    // unreadable: shown as it is
+  }
+  if (!pixels) {
+    upscaled.set(src, '')
+    return Promise.resolve('')
+  }
+  if (!upscaler) {
+    upscaler = new Worker('js/upscaler.js')
+    upscaler.addEventListener('message', (event: MessageEvent<{ id: number; blob: Blob | null }>) => {
+      waiting.get(event.data.id)?.(event.data.blob)
+      waiting.delete(event.data.id)
+    })
+  }
+  const id = nextId++
+  const result = new Promise<Blob | null>((resolve) => {
+    waiting.set(id, resolve)
+  }).then((blob) => {
+    const url = blob ? URL.createObjectURL(blob) : ''
+    upscaled.set(src, url)
+    return url
+  })
+  upscaling.set(src, result)
+  upscaler.postMessage({ id, pixels }, [pixels.data.buffer])
+  return result
+}
+
 // thumb: the image's id, null for one that isn't stored yet.
 function thumbBox(preview: { title: string; url: string }, src: string, thumb: ThumbId | null): HTMLElement {
   const box = el('div', { class: 'Thumb' })
@@ -519,7 +564,8 @@ function thumbBox(preview: { title: string; url: string }, src: string, thumb: T
     box.append(letter())
     return box
   }
-  const img = el('img', { src, alt: '', draggable: false, loading: 'lazy' })
+  const big = upscaled.get(src)
+  const img = el('img', { src: big || src, alt: '', draggable: false, loading: 'lazy' })
   img.addEventListener(
     'error',
     () => {
@@ -530,11 +576,17 @@ function thumbBox(preview: { title: string; url: string }, src: string, thumb: T
   img.addEventListener(
     'load',
     () => {
-      box.classList.toggle('Thumb--small', img.naturalWidth < SMALL_IMAGE)
-      if (known !== undefined) return
-      const color = readColor(img)
-      if (color) box.style.setProperty('--thumb-color', color)
-      if (thumb) rememberColor(thumb, color ?? '')
+      box.classList.toggle('Thumb--small', !!big || img.naturalWidth < SMALL_IMAGE)
+      if (known === undefined) {
+        const color = readColor(img)
+        if (color) box.style.setProperty('--thumb-color', color)
+        if (thumb) rememberColor(thumb, color ?? '')
+      }
+      if (big === undefined && img.naturalWidth <= SMALL_ICON) {
+        void upscaledOf(src, img).then((url) => {
+          if (url) img.src = url
+        })
+      }
     },
     { once: true }
   )
@@ -2383,17 +2435,20 @@ function iconOf(spark: Spark): string {
 
 // The sites to look for: those never looked for, or found without an icon a while ago ('due'); all
 // without an icon ('all': site access was just allowed, say); or all without one, in the browser's
-// copies only ('browser': cheap, for sites just visited). Found icons show as they come in; a look
-// at the sites themselves shows its progress.
+// copies only ('browser': cheap, for sites just visited). With site access, a small icon the site
+// itself wasn't asked for is looked for too: the browser's copies are small (Chrome's are 32 px).
+// Found icons show as they come in; a look at the sites themselves shows its progress.
 async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'browser' = 'due'): Promise<void> {
   const pages = new Map<string, string>() // a page of each site, for the browser's copy
   for (const spark of sparks) {
     const origin = wantsIcon(spark) ? originOf(spark.url) : null
     if (origin && !pages.has(origin)) pages.set(origin, spark.url)
   }
-  await siteIcons.load([...pages.keys()])
-  const missing = [...pages.keys()].filter((origin) => !siteIcons.get(origin))
-  const due = (which === 'due' ? siteIcons.due([...pages.keys()]) : missing).filter((origin) => !lookingFor.has(origin))
+  const origins = [...pages.keys()]
+  await siteIcons.load(origins)
+  const access = which !== 'browser' && (await browser.permissions.contains(ALL_SITES).catch(() => false))
+  const looked = which === 'due' ? siteIcons.due(origins) : origins.filter((origin) => !siteIcons.get(origin))
+  const due = [...new Set([...looked, ...(access ? siteIcons.upgradable(origins) : [])])].filter((origin) => !lookingFor.has(origin))
   if (!due.length || (which === 'browser' && !currentBrowser.keepsIcons)) return
   for (const origin of due) lookingFor.add(origin)
   const found = new Map<string, string>()
@@ -2402,8 +2457,11 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
     for (const [origin, icon] of fromBrowser) if (icon) found.set(origin, icon)
     await keepIcons(found) // the others stay as they were, for now
     if (which === 'browser') return
-    const rest = due.filter((origin) => !found.has(origin) && !currentBrowser.closedSites.has(origin))
-    if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
+    const current = (origin: string): string => found.get(origin) || siteIcons.get(origin)
+    const rest = due.filter((origin) => (!current(origin) || isSmallIcon(current(origin))) && !currentBrowser.closedSites.has(origin))
+    // A site's icon replaces a smaller one only.
+    const bigger = (origin: string, src: string): boolean => (iconWidth(src) ?? Infinity) > (iconWidth(current(origin)) ?? 0)
+    if (rest.length && access) {
       // Shown in batches, not one by one: each one shown draws the sparks anew.
       let batch = new Map<string, string>()
       const show = (): Promise<void> => {
@@ -2418,15 +2476,16 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
           showIconCard(done, rest.length)
         },
         onIcon: (origin, src) => {
-          batch.set(origin, src)
+          if (bigger(origin, src)) batch.set(origin, src)
         }
       }).finally(() => {
         clearInterval(timer)
       })
       await show()
-      for (const [origin, src] of fromSites) found.set(origin, src)
+      for (const [origin, src] of fromSites) if (bigger(origin, src)) found.set(origin, src)
     }
-    await siteIcons.save(due, found) // the ones without an icon: not asked again for a while
+    // The ones without an icon: not asked again for a while; the sites asked: not again for a bigger one.
+    await siteIcons.save(due, found, new Set(access ? rest : []))
   } finally {
     for (const origin of due) lookingFor.delete(origin)
     iconCard.hidden = true
