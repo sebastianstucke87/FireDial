@@ -30,15 +30,15 @@ English
 
 ### Store icon
 
-`cws-icon.png` (orange; the icons inside Chrome are grey)
+`store/icon.png` (orange; the icons inside Chrome are grey)
 
 ### Screenshots
 
-`browsers/screenshots/` scaled to 1280×800, the only size the store takes, with the captions in `amo-listing.md`: the same everywhere.
+`browsers/shared/screenshots/` scaled to 1280×800, the only size the store takes, with the captions in `browsers/firefox/store/listing.md`: the same everywhere.
 
 ### Small promo tile
 
-`cws-promo-small.png` (440×280), made with the screenshots. No marquee tile.
+`browsers/shared/promo-small.png` (440×280), made with the screenshots. No marquee tile.
 
 ### Homepage URL
 

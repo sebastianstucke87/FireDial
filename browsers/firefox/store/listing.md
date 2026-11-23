@@ -1,6 +1,6 @@
-# AMO listing
+# Firefox Add-ons listing
 
-What to fill in on addons.mozilla.org (Developer Hub → Edit Product Page). Name, summary, categories, license and reviewer notes come from `amo-metadata.json` with each release; everything else is set here by hand.
+What to fill in on addons.mozilla.org (Developer Hub → Edit Product Page). Name, summary, categories, license and reviewer notes come from `store/metadata.json` with each release; everything else is set here by hand.
 
 ## Name
 
@@ -12,7 +12,7 @@ FireDial
 
 ## Icon
 
-`amo-icon.png` (512px), made with `node scripts/icon.local.ts`.
+`browsers/shared/logo.png` (512px), made with `node scripts/icon.local.ts`.
 
 ## Experimental
 
@@ -42,7 +42,7 @@ Tabs, Bookmarks
 
 ## Tags
 
-search, privacy (AMO's fixed list has nothing closer; categories carry Tabs and Bookmarks)
+search, privacy (Firefox Add-ons' fixed list has nothing closer; categories carry Tabs and Bookmarks)
 
 ## Homepage
 
@@ -70,7 +70,7 @@ FireDial collects no data. Optional Sync keeps your sparks in your own Google Dr
 
 ## Screenshots
 
-The same as in the README and on the Chrome Web Store: `browsers/screenshots/`, 2560×1600 (1280×800 at 2×), made with `npm run build && node scripts/screenshots.local.ts` from the sparks FireDial comes with.
+The same as in the README and on the Chrome Web Store: `browsers/shared/screenshots/`, 2560×1600 (1280×800 at 2×), made with `npm run build && node scripts/screenshots.local.ts` from the sparks FireDial comes with.
 
 | File        | Caption                                      |
 | ----------- | -------------------------------------------- |

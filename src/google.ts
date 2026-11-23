@@ -1,15 +1,10 @@
 // Google sign-in for sync: a token for Drive's app folder only, through the browser's own sign-in
 // window. Interactive only from a click; when the token runs out, a silent renewal is tried first.
 
-import * as z from 'zod/mini'
-
-import { IS_CHROME } from './browser.ts'
+import { currentBrowser } from './browser/index.ts'
 import type { Auth } from './drive.ts'
 import { OfflineError, SignInError } from './drive.ts'
 import { GOOGLE_CLIENT_ID } from './sync-config.ts'
-
-// What sync sends to Drive, in Firefox's words: sparks are bookmarks, previews show web pages.
-export const SYNC_DATA: browser._manifest.OptionalDataCollectionPermission[] = ['bookmarksInfo', 'websiteContent']
 
 // Sync's hidden app folder, and the files FireDial makes in the user's Drive: the backups.
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file'
@@ -72,16 +67,10 @@ export function googleAuth(hint: () => Promise<string>): Auth {
   }
 }
 
-// Chrome's navigator.userAgentData, which TypeScript doesn't know yet.
-const UserAgentData = z.catch(z.object({ brands: z.array(z.object({ brand: z.string() })) }), { brands: [] })
-
 const SYSTEMS: Readonly<Record<string, string>> = { win: 'Windows', mac: 'macOS', linux: 'Linux', cros: 'ChromeOS', android: 'Android', openbsd: 'OpenBSD' }
 
 // "Firefox on Windows": which browser made the last change, as the Sync section shows it.
 export async function deviceName(): Promise<string> {
   const { os } = await browser.runtime.getPlatformInfo()
-  const { brands } = UserAgentData.parse(Reflect.get(navigator, 'userAgentData'))
-  const brand = brands.map((each) => each.brand).find((name) => !/chromium|not.?a.?brand/i.test(name))
-  const name = IS_CHROME ? (brand ?? 'Chrome').replace(/^(Google|Microsoft) /, '') : 'Firefox'
-  return `${name} on ${SYSTEMS[os] ?? os}`
+  return `${currentBrowser.product} on ${SYSTEMS[os] ?? os}`
 }

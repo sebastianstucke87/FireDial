@@ -8,6 +8,8 @@
   "mutate": [
     "src/*.ts",
     "!src/*.test.ts",
+    "src/browser/*.ts",
+    "!src/browser/*.test.ts",
     "!src/background.ts",
     "!src/newtab.ts",
     "!src/theme.ts",

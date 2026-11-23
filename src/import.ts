@@ -4,7 +4,7 @@
 // FireDial's own folder stays out. An address FireDial has already is left out, so a second
 // import adds only what's new.
 
-import { isBookmark, isFolder, isOtherBookmarks } from './bookmarks.ts'
+import type { BookmarkTree } from './browser/index.ts'
 import { sameLabel, toLabel, toLabelName, toSparkUrl, viewTitled } from './model.ts'
 import type { Doc, Label, LabelName, SparkUrl } from './model.ts'
 
@@ -44,7 +44,7 @@ function sameAddress(url: string): string {
 const labelOf = (title: string): LabelName | null => toLabelName(title.replace(/,/g, ' '))
 
 // skip: the id of FireDial's own folder; without one, a folder named FireDial in Other Bookmarks.
-export function planImport(root: BookmarkNode, doc: Doc, skip: string | null): ImportPlan {
+export function planImport(root: BookmarkNode, doc: Doc, skip: string | null, tree: BookmarkTree): ImportPlan {
   const plan: ImportPlan = { views: [], sparks: [], folders: 0, known: 0, skipped: 0 }
   const addresses = new Set(doc.sparks.map((spark) => sameAddress(spark.url)))
   const folders = new Set<string>()
@@ -67,8 +67,8 @@ export function planImport(root: BookmarkNode, doc: Doc, skip: string | null): I
 
   const walk = (folder: BookmarkNode, labels: readonly LabelName[], top: LabelName | null): void => {
     for (const node of folder.children ?? []) {
-      if (isBookmark(node)) add(node, labels, top, folder.id)
-      else if (isFolder(node) && node.id !== skip) {
+      if (tree.isBookmark(node)) add(node, labels, top, folder.id)
+      else if (tree.isFolder(node) && node.id !== skip) {
         const label = labelOf(node.title)
         walk(node, label && !labels.some((each) => sameLabel(each, label)) ? [...labels, label] : labels, top)
       }
@@ -77,9 +77,9 @@ export function planImport(root: BookmarkNode, doc: Doc, skip: string | null): I
 
   for (const area of root.children ?? []) {
     for (const node of area.children ?? []) {
-      const ownFolder = node.id === skip || (skip === null && isOtherBookmarks(area) && node.title === 'FireDial')
-      if (isBookmark(node)) add(node, [], null, area.id)
-      else if (isFolder(node) && !ownFolder) {
+      const ownFolder = node.id === skip || (skip === null && tree.isOtherBookmarks(area) && node.title === 'FireDial')
+      if (tree.isBookmark(node)) add(node, [], null, area.id)
+      else if (tree.isFolder(node) && !ownFolder) {
         const label = labelOf(node.title)
         walk(node, label ? [label] : [], label)
       }

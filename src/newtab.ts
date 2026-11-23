@@ -1,6 +1,6 @@
 // FireDial new tab page.
 
-import { ALL_SITES, BROWSER_NAME, IS_CHROME, searchEngines, searchWeb } from './browser.ts'
+import { ALL_SITES, currentBrowser } from './browser/index.ts'
 
 import { backupName, exportParts, importSummary, readBackup } from './backup.ts'
 import { parseMap } from './bookmarks.ts'
@@ -8,7 +8,7 @@ import { honeycomb, labelColor, mainColor, markOn, textOn } from './color.ts'
 import { saveFile } from './download.ts'
 import { loadIcons } from './favicons.ts'
 import { addIcons, originOf, originOfKey, readIcons, SiteIcons, sitesOf } from './icons.ts'
-import { blobToDataUrl, faviconPath, isStoredImage, readImage, siteAccess } from './images.ts'
+import { blobToDataUrl, isStoredImage, readImage, siteAccess } from './images.ts'
 import { planImport } from './import.ts'
 import {
   accentOf,
@@ -896,7 +896,7 @@ let suggestIndex = 0
 
 async function loadEngines(): Promise<void> {
   try {
-    engines = await searchEngines(browser.search)
+    engines = await currentBrowser.searchEngines(browser.search)
   } catch (error) {
     console.error('search.get:', error)
     engines = []
@@ -916,7 +916,7 @@ function parseQuery(text: string): ParsedQuery {
 
 function webSearch({ engine, terms }: ParsedQuery): void {
   if (!terms) return
-  void searchWeb(browser.search, terms, engine?.name)
+  void currentBrowser.searchWeb(browser.search, terms, engine?.name)
 }
 
 const suggestItems = (): HTMLElement[] => $$('.SuggestItem', HTMLElement, suggestBox)
@@ -2275,7 +2275,7 @@ document.addEventListener('focusout', () => {
 
 function openAbout(): void {
   html('#aboutVersion').textContent = `FireDial ${browser.runtime.getManifest().version}`
-  html('#browserName').textContent = BROWSER_NAME
+  html('#browserName').textContent = currentBrowser.name
   void showSiteAccess()
   void aboutModal.open()
 }
@@ -2302,7 +2302,7 @@ async function importBookmarks(): Promise<void> {
   aboutModal.close()
   const [root] = await browser.bookmarks.getTree()
   const { bookmarkMap } = await browserKeyValue.get('bookmarkMap')
-  const plan = root ? planImport(root, store.doc, parseMap(bookmarkMap).root) : null
+  const plan = root ? planImport(root, store.doc, parseMap(bookmarkMap).root, currentBrowser.bookmarks) : null
   if (!plan?.sparks.length) {
     notify(plan?.known ? 'Nothing new to import' : 'No bookmarks to import')
     return
@@ -2311,7 +2311,7 @@ async function importBookmarks(): Promise<void> {
   const sure = await confirm.ask(
     {
       title: 'Import bookmarks',
-      text: `Import ${plural(plan.sparks.length, 'bookmark')} from ${plural(plan.folders, 'folder')}${plan.known ? ` (${plan.known} ${plan.known === 1 ? 'is' : 'are'} in FireDial already)` : ''}. Folders become labels; top folders also become views. ${BROWSER_NAME}'s bookmarks stay as they are.`,
+      text: `Import ${plural(plan.sparks.length, 'bookmark')} from ${plural(plan.folders, 'folder')}${plan.known ? ` (${plan.known} ${plan.known === 1 ? 'is' : 'are'} in FireDial already)` : ''}. Folders become labels; top folders also become views. ${currentBrowser.name}'s bookmarks stay as they are.`,
       button: 'Import'
     },
     () => {
@@ -2360,21 +2360,12 @@ async function iconImage(response: Response): Promise<string | null> {
 
 const originsOf = (sparks: readonly Spark[]): string[] => [...new Set(sparks.map((spark) => originOf(spark.url)).filter((origin) => origin !== null))]
 
-// Chrome keeps the icons of sites it has been to, which need no site access. For any other site
-// it gives its own globe, which isn't the site's icon.
+// The browser's copy of a site's icon. For a site it has no icon of, Chrome gives its own globe,
+// which isn't the site's icon.
 let globe: Promise<string> | null = null
 async function browserIcon(url: string): Promise<string> {
-  if (!IS_CHROME) return ''
-  const read = async (page: string): Promise<string> => {
-    try {
-      const response = await fetch(browser.runtime.getURL(faviconPath(page, 64)))
-      return response.ok ? await blobToDataUrl(await response.blob()) : ''
-    } catch {
-      return ''
-    }
-  }
-  globe ??= read('https://example.invalid/')
-  const icon = await read(url)
+  globe ??= currentBrowser.iconOf('https://example.invalid/')
+  const icon = await currentBrowser.iconOf(url)
   return isStoredImage(icon) && icon !== (await globe) ? icon : ''
 }
 
@@ -2404,7 +2395,7 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
   await siteIcons.load([...pages.keys()])
   const missing = [...pages.keys()].filter((origin) => !siteIcons.get(origin))
   const due = (which === 'due' ? siteIcons.due([...pages.keys()]) : missing).filter((origin) => !lookingFor.has(origin))
-  if (!due.length || (which === 'browser' && !IS_CHROME)) return
+  if (!due.length || (which === 'browser' && !currentBrowser.keepsIcons)) return
   for (const origin of due) lookingFor.add(origin)
   const found = new Map<string, string>()
   try {
@@ -2412,7 +2403,7 @@ async function findIcons(sparks: readonly Spark[], which: 'due' | 'all' | 'brows
     for (const [origin, icon] of fromBrowser) if (icon) found.set(origin, icon)
     await keepIcons(found) // the others stay as they were, for now
     if (which === 'browser') return
-    const rest = due.filter((origin) => !found.has(origin) && !CLOSED_SITES.has(origin))
+    const rest = due.filter((origin) => !found.has(origin) && !currentBrowser.closedSites.has(origin))
     if (rest.length && (await browser.permissions.contains(ALL_SITES).catch(() => false))) {
       // Shown in batches, not one by one: each one shown draws the sparks anew.
       let batch = new Map<string, string>()
@@ -2459,8 +2450,6 @@ async function keepIcons(found: ReadonlyMap<string, string>): Promise<void> {
 function askIconAccess(): Promise<boolean> {
   return browser.permissions.request(ALL_SITES).catch(() => false)
 }
-// Sites the browser keeps closed to add-ons, site access or not: asking them only gets an error.
-const CLOSED_SITES = new Set(IS_CHROME ? ['https://chrome.google.com', 'https://chromewebstore.google.com'] : [])
 const iconCard = html('#iconCard')
 const iconBar = $('#iconBar', HTMLProgressElement)
 
@@ -2523,12 +2512,11 @@ function tabLoaded(tabId: number, signal: AbortSignal): Promise<void> {
 const NOTE_TIME = 800 // ms the note on a captured page stays before its tab closes
 
 // Needs access to all sites, which the caller asks for (kept once given). Closing the page's tab
-// cancels the whole refresh, like the card's Cancel.
-// Firefox captures a tab in the background, so FireDial and its card stay in front. Chrome only
-// captures the tab in front: the page shows, and note (if any) appears on it once it's captured.
+// cancels the whole refresh, like the card's Cancel. Where the page has to be in front to be
+// captured, note (if any) appears on it once it's captured.
 async function capturePage(url: string, cancel: AbortController, note: string | null = null): Promise<string> {
   const home = await browser.tabs.getCurrent()
-  const tab = await browser.tabs.create({ url, active: IS_CHROME, ...(home?.windowId === undefined ? {} : { windowId: home.windowId }) })
+  const tab = await browser.tabs.create({ url, active: currentBrowser.previewInFront, ...(home?.windowId === undefined ? {} : { windowId: home.windowId }) })
   let ending = false
   const closed = (id: number): void => {
     if (id === tab.id && !ending) cancel.abort()
@@ -2542,24 +2530,23 @@ async function capturePage(url: string, cancel: AbortController, note: string | 
     if (cancel.signal.aborted) return ''
     let src = ''
     try {
-      const shot = IS_CHROME
-        ? await browser.tabs.captureVisibleTab(tab.windowId ?? browser.windows.WINDOW_ID_CURRENT, { format: 'jpeg', quality: 85 })
-        : await browser.tabs.captureTab(tabId, { format: 'jpeg', quality: 85 })
-      src = await shrinkImage(shot)
+      src = await shrinkImage(await currentBrowser.capture(tab))
     } catch {
       // the browser doesn't let this page be captured
     }
     const stopped = (): boolean => cancel.signal.aborted // read anew: closing the tab cancels meanwhile
-    if (note && IS_CHROME && !stopped()) {
-      await browser.scripting.executeScript({ target: { tabId }, func: showToast, args: toastArgs(note, store.doc.prefs) }).catch(() => undefined)
-      await new Promise((resolve) => setTimeout(resolve, NOTE_TIME))
+    if (note && !stopped()) {
+      await currentBrowser.noteOnPage(async () => {
+        await browser.scripting.executeScript({ target: { tabId }, func: showToast, args: toastArgs(note, store.doc.prefs) }).catch(() => undefined)
+        await new Promise((resolve) => setTimeout(resolve, NOTE_TIME))
+      })
     }
     return src
   } finally {
     ending = true
     browser.tabs.onRemoved.removeListener(closed)
     if (tab.id !== undefined) await browser.tabs.remove(tab.id).catch(() => undefined)
-    if (IS_CHROME && home?.id !== undefined) await browser.tabs.update(home.id, { active: true }).catch(() => undefined)
+    await currentBrowser.backTo(home)
   }
 }
 
