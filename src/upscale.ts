@@ -195,7 +195,6 @@ function double(src: Float32Array, width: number, height: number): Float32Array 
 export function upscale(image: Pixels, to: number = UPSCALE_TO): Pixels {
   if (image.width >= to) return image
   let { data, width, height } = undouble(image)
-  if (width >= to) return { data, width, height }
   let pixels = premultiplied(data)
   while (width < to) {
     pixels = double(pixels, width, height)
