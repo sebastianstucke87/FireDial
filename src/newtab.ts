@@ -517,9 +517,23 @@ const waiting = new Map<number, (blob: Blob | null) => void>()
 let upscaler: Worker | null = null
 let nextId = 0
 
-function upscaledOf(src: string): Promise<string> {
+// img: the icon, loaded.
+function upscaledOf(src: string, img: HTMLImageElement): Promise<string> {
   const known = upscaling.get(src)
   if (known) return known
+  let pixels: ImageData | undefined
+  try {
+    const { naturalWidth: width, naturalHeight: height } = img
+    const context = el('canvas', { width, height }).getContext('2d', { willReadFrequently: true })
+    context?.drawImage(img, 0, 0)
+    pixels = context?.getImageData(0, 0, width, height)
+  } catch {
+    // unreadable: shown as it is
+  }
+  if (!pixels) {
+    upscaled.set(src, '')
+    return Promise.resolve('')
+  }
   if (!upscaler) {
     upscaler = new Worker('js/upscaler.js')
     upscaler.addEventListener('message', (event: MessageEvent<{ id: number; blob: Blob | null }>) => {
@@ -536,7 +550,7 @@ function upscaledOf(src: string): Promise<string> {
     return url
   })
   upscaling.set(src, result)
-  upscaler.postMessage({ id, src })
+  upscaler.postMessage({ id, pixels }, [pixels.data.buffer])
   return result
 }
 
@@ -569,7 +583,7 @@ function thumbBox(preview: { title: string; url: string }, src: string, thumb: T
         if (thumb) rememberColor(thumb, color ?? '')
       }
       if (big === undefined && img.naturalWidth <= SMALL_ICON) {
-        void upscaledOf(src).then((url) => {
+        void upscaledOf(src, img).then((url) => {
           if (url) img.src = url
         })
       }
