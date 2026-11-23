@@ -1,4 +1,4 @@
-// Builds the extension into dist/firefox and dist/chrome.
+// Builds the extension into dist/firefox, dist/chrome and dist/edge.
 
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { build } from 'esbuild'
@@ -18,14 +18,16 @@ if (!/^(0|[1-9]\d{0,4})(\.(0|[1-9]\d{0,4})){0,3}$/.test(version) || version.spli
 }
 
 interface Target {
-  browser: 'firefox' | 'chrome'
+  browser: 'firefox' | 'chrome' | 'edge'
   esbuild: string
   icons: string
 }
 
 const targets: Target[] = [
   { browser: 'firefox', esbuild: 'firefox142', icons: 'browsers/firefox/icons' },
-  { browser: 'chrome', esbuild: 'chrome134', icons: 'browsers/chrome/icons' }
+  { browser: 'chrome', esbuild: 'chrome134', icons: 'browsers/chrome/icons' },
+  // Edge's toolbar can't follow dark mode either: Chrome's grey icons.
+  { browser: 'edge', esbuild: 'edge134', icons: 'browsers/chrome/icons' }
 ]
 
 rmSync('dist', { recursive: true, force: true })

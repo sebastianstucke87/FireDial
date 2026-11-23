@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { chromeFor } from './chrome.ts'
+import { edge } from './edge.ts'
 import { firefox, SYNC_DATA } from './firefox.ts'
 import { ALL_SITES } from './shared.ts'
 
@@ -141,4 +142,19 @@ test('names: Firefox is Firefox; a Chromium browser is Chrome in texts, its own 
 
 test('Firefox without a list of engines has none to offer', async () => {
   assert.deepEqual(await firefox.searchEngines({ query: () => Promise.resolve(), search: () => Promise.resolve() }), [])
+})
+
+test("Edge's icon copies come without a type: they're PNGs", async () => {
+  favicon = new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+  assert.match(await edge.iconOf('https://a.example/'), /^data:image\/png;base64,/)
+  take()
+})
+
+test('Edge is Chrome but for its name and its closed store', () => {
+  assert.equal(edge.name, 'Edge')
+  assert.equal(edge.product, 'Edge')
+  assert.deepEqual([...edge.closedSites], ['https://microsoftedge.microsoft.com'])
+  assert.equal(edge.previewInFront, true)
+  assert.equal(edge.keepsIcons, true)
+  assert.deepEqual(edge.menuContexts, ['all'])
 })

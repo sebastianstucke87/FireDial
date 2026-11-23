@@ -28,7 +28,10 @@ export const chromeFor = (product: string): Browser => ({
   iconOf: async (pageUrl) => {
     try {
       const response = await fetch(browser.runtime.getURL(faviconPath(pageUrl, 64)))
-      return response.ok ? await blobToDataUrl(await response.blob()) : ''
+      if (!response.ok) return ''
+      // Always a PNG; Edge just doesn't say so.
+      const icon = await response.blob()
+      return await blobToDataUrl(icon.type ? icon : new Blob([icon], { type: 'image/png' }))
     } catch {
       return ''
     }
