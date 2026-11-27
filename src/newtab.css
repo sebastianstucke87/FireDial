@@ -371,6 +371,20 @@ html:has(.App--options) {
   display: none;
 }
 
+/* while the sidebar is resized: the normal look, so the names show the width they will have */
+.editing.resizing .Group {
+  padding-left: 12px;
+} /* the right edge stays as in Edit, so the counts hold still */
+
+.editing.resizing .Handle,
+.editing.resizing .NameInput {
+  display: none;
+}
+
+.editing.resizing .Group .Name {
+  display: block;
+}
+
 .NameInput {
   display: none;
   flex: 1;
